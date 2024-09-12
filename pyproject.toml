@@ -25,7 +25,9 @@ dependencies = [
     "oddt>=0.7",
     "rdkit>=2023.03",
     "numpy>=1.21",
-    "matplotlib>=3.4"
+    "matplotlib>=3.4",
+    "tqdm",
+    "pandas"
 ]
 
 [project.optional-dependencies]
