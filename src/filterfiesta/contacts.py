@@ -1,7 +1,5 @@
 import numpy as np
 from rdkit import Chem
-from rdkit.Chem import AllChem
-from rdkit.Geometry import Point3D
 from tqdm import tqdm
 from numba import njit
 
@@ -43,7 +41,14 @@ class Contacts:
     def __init__(self,rec_path, lig_path):
         self.receptor = Chem.MolFromPDBFile(rec_path)
         self.ligands = Chem.SDMolSupplier(lig_path)
-        self.vdwradii = {6: 1.7, 1: 1.2, 7: 1.55, 8: 1.52}
+        self.vdwradii = {1 : 1.2,
+                         6: 1.7,
+                         7: 1.55,
+                         8: 1.52,
+                         9: 1.47,
+                         15:1.8,
+                         16: 1.8,
+                         17: 1.75} #A. Bondi, "van der Waals Volumes and Radii",; J. Phys. Chem. 68 (1964) 441-451
         self.overlaps=[]
         self.reloverlap=[]
 
