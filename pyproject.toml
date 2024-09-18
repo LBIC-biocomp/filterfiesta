@@ -3,24 +3,33 @@ requires = ["flit_core >=2,<4"]
 build-backend = "flit_core.buildapi"
 
 [project]
-name =  "py-project-toml"
+name =  "filterfiesta"
 authors = [
-    {name = "Daniel Ciborowski", email = "dciborow@microsoft.com"},
+    {name = "Luca Tongiorgi", email = "luca.tongiorgi@studio.unibo.it"},
+    {name = "Simone Albani", email = "simone.albani4@unibo.it"},
 ]
-description = "Sample Python Project for creating a new Python Module"
+description = "A python library to rescore and filter your docking results."
 readme = "README.md"
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11"
 ]
-requires-python = ">=3.8.1"
+requires-python = ">=3.9"
 dynamic = ["version"]
+dependencies = [
+    "oddt>=0.7",
+    "rdkit>=2023.03",
+    "numpy>=1.21",
+    "matplotlib>=3.4",
+    "tqdm",
+    "pandas",
+    "numba",
+]
 
 [project.optional-dependencies]
 spark = [
@@ -52,7 +61,7 @@ Source = "https://github.com/microsoft/python-package-template"
 Tracker = "https://github.com/microsoft/python-package-template/issues"
 
 [tool.flit.module]
-name = "python_package"
+name = "filterfiesta"
 
 [tool.bandit]
 exclude_dirs = ["build","dist","tests","scripts"]
