@@ -3,6 +3,8 @@ import pandas as pd
 from rdkit import Chem
 import oddt
 from tqdm import tqdm
+from sklearn.metrics import jaccard_score
+import numpy as np
 
 class Fingerprint:
     def __init__(self,proteinfile,ligandfile):
@@ -40,5 +42,45 @@ class Fingerprint:
             fp.append(PLIF)
 
         self.pd_fp_explicit = pd.DataFrame(fp,columns=fp_column_descriptor)
+        self.pd_fp_explicit = (self.pd_fp_explicit > 0).astype(int)
 
         return self.pd_fp_explicit
+
+    def calculate_jaccard(self, reference_vector):
+        """
+        Calculates the Jaccard score between a binary reference vector and each row of the pd_fp_explicit DataFrame.
+
+        Parameters:
+        - reference_vector (list or np.array): A binary vector (0s and 1s) with the same length as the number of columns
+                                               in the pd_fp_explicit DataFrame.
+
+        Returns:
+        - List of Jaccard scores: One score for each row in the pd_fp_explicit DataFrame.
+        """
+        if self.pd_fp_explicit is None:
+            raise ValueError("Make sure to calculate the fingerprints first.")
+
+        if len(reference_vector) != self.pd_fp_explicit.shape[1]:
+            raise ValueError("The reference vector length must match the number of columns in the fingerprint, i.e., 8 time the number of residues")
+
+        # Convert the reference vector to a numpy array if it's not already
+        reference_vector = np.array(reference_vector)
+        # Calculate Jaccard scores for each row
+        jaccard_scores = []
+        for index, row in tqdm(self.pd_fp_explicit.iterrows(),total=len(self.pd_fp_explicit)):
+            score = jaccard_score(reference_vector, row.values)
+            jaccard_scores.append(score)
+
+        return jaccard_scores
+
+    def save(self,path):
+        if self.pd_fp_explicit is None:
+            raise ValueError("Make sure to calculate the fingerprints first.")
+
+        np.save(path,self.pd_fp_explicit.to_numpy())
+
+    def load(self,path,columns=None):
+        array=np.load(path)
+        if not columns:
+            columns=range(array.shape[1])
+        self.pd_fp_explicit=pd.DataFrame(array,columns=columns)
