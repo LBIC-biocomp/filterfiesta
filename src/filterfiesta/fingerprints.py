@@ -83,7 +83,7 @@ class Fingerprint:
         # Calculate Jaccard scores for each row
         jaccard_scores = []
         for index, row in tqdm(self.pd_fp_explicit.iterrows(),total=len(self.pd_fp_explicit)):
-            score = jaccard_score(reference_vector, row.values)
+            score = jaccard_score(self.reference_vector, row.values)
             jaccard_scores.append(score)
 
         return jaccard_scores
