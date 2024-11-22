@@ -7,7 +7,7 @@ from sklearn.metrics import jaccard_score
 import numpy as np
 
 class Fingerprint:
-    def __init__(self,proteinfile,ligandfile):
+    def __init__(self,proteinfile,ligandfile=None): # !!!! changed ligandfile as not mandatory, NEEDS CHECKING
         protein_rdkitmol=Chem.rdmolfiles.MolFromPDBFile(proteinfile)
         self.protein = oddt.toolkit.Molecule(protein_rdkitmol)
         self.protein.protein=True
@@ -15,10 +15,10 @@ class Fingerprint:
         self.ligands=Chem.rdmolfiles.SDMolSupplier(ligandfile)
         self.pd_fp_explicit = None
 
-    def PLIF(self):
+    def get_residues(self):
 
         # CREATE DESCRIPTION FOR FINGERPRINT BITS
-        fp_column_descriptor = []
+        self.fp_column_descriptor = []
         ia_type = [
         "VDW",
         "AR-FF",
@@ -32,21 +32,36 @@ class Fingerprint:
         res_code = ["{}:{}{}".format(res.chain,res.name,res.number) for res in self.protein.residues]
         for res in res_code:
             for ia in ia_type:
-                fp_column_descriptor.append("{}-{}".format(res,ia))
+                self.fp_column_descriptor.append("{}-{}".format(res,ia))
 
+        return self.fp_column_descriptor
 
+    def plif(self):
         fp=[]
         for mol in tqdm(self.ligands):
             mol=oddt.toolkit.Molecule(mol)
-            PLIF = InteractionFingerprint(mol,self.protein)
-            fp.append(PLIF)
+            plif = InteractionFingerprint(mol,self.protein)
+            fp.append(plif)
 
-        self.pd_fp_explicit = pd.DataFrame(fp,columns=fp_column_descriptor)
+        self.pd_fp_explicit = pd.DataFrame(fp,columns=self.fp_column_descriptor)
         self.pd_fp_explicit = (self.pd_fp_explicit > 0).astype(int)
 
         return self.pd_fp_explicit
 
-    def calculate_jaccard(self, reference_vector):
+    def create_ref_vector(self, ref_residues_file, all_residues): # !!!! NEEDS CHECKING
+        pd.set_option('future.no_silent_downcasting', True)
+
+        bits = pd.DataFrame(columns=pd.read_csv(ref_residues_file, header=None)[0])
+        bits.loc[0] = None
+        bits = bits.fillna(1)
+
+        all_res_df = pd.DataFrame(columns=all_residues)
+
+        self.reference_vector = pd.concat([all_res_df, bits], ignore_index=True).fillna(0)
+
+        return self.reference_vector
+
+    def calculate_jaccard(self): # !!!!! NEEDS CHECKING
         """
         Calculates the Jaccard score between a binary reference vector and each row of the pd_fp_explicit DataFrame.
 
@@ -60,11 +75,11 @@ class Fingerprint:
         if self.pd_fp_explicit is None:
             raise ValueError("Make sure to calculate the fingerprints first.")
 
-        if len(reference_vector) != self.pd_fp_explicit.shape[1]:
+        if len(self.reference_vector) != self.pd_fp_explicit.shape[1]:
             raise ValueError("The reference vector length must match the number of columns in the fingerprint, i.e., 8 time the number of residues")
 
         # Convert the reference vector to a numpy array if it's not already
-        reference_vector = np.array(reference_vector)
+        self.reference_vector = np.array(self.reference_vector)
         # Calculate Jaccard scores for each row
         jaccard_scores = []
         for index, row in tqdm(self.pd_fp_explicit.iterrows(),total=len(self.pd_fp_explicit)):
