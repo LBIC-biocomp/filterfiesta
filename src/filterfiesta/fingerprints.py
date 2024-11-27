@@ -7,7 +7,8 @@ from sklearn.metrics import jaccard_score
 import numpy as np
 
 class Fingerprint:
-    def __init__(self,proteinfile,ligandfile=None): # !!!! changed ligandfile as not mandatory, NEEDS CHECKING
+    def __init__(self,proteinfile,ligandfile):
+    
         protein_rdkitmol=Chem.rdmolfiles.MolFromPDBFile(proteinfile)
         self.protein = oddt.toolkit.Molecule(protein_rdkitmol)
         self.protein.protein=True
@@ -36,19 +37,22 @@ class Fingerprint:
 
         return self.fp_column_descriptor
 
-    def plif(self):
+    def plif(self, column_descriptor):
         fp=[]
         for mol in tqdm(self.ligands):
             mol=oddt.toolkit.Molecule(mol)
             plif = InteractionFingerprint(mol,self.protein)
             fp.append(plif)
-
-        self.pd_fp_explicit = pd.DataFrame(fp,columns=self.fp_column_descriptor)
+        
+        self.pd_fp_explicit = pd.DataFrame(fp,columns=column_descriptor)
         self.pd_fp_explicit = (self.pd_fp_explicit > 0).astype(int)
 
         return self.pd_fp_explicit
 
-    def create_ref_vector(self, ref_residues_file, all_residues): # !!!! NEEDS CHECKING
+
+    def calculate_jaccard(self, ref_residues_file, all_residues): 
+        
+        # CALCULATE REFERENCE VECTOR
         pd.set_option('future.no_silent_downcasting', True)
 
         bits = pd.DataFrame(columns=pd.read_csv(ref_residues_file, header=None)[0])
@@ -58,10 +62,8 @@ class Fingerprint:
         all_res_df = pd.DataFrame(columns=all_residues)
 
         self.reference_vector = pd.concat([all_res_df, bits], ignore_index=True).fillna(0)
-
-        return self.reference_vector
-
-    def calculate_jaccard(self): # !!!!! NEEDS CHECKING
+        np.save('reference_fingerprint.npy',self.reference_vector.to_numpy())
+        # !!!!! NEEDS CHECKING
         """
         Calculates the Jaccard score between a binary reference vector and each row of the pd_fp_explicit DataFrame.
 
