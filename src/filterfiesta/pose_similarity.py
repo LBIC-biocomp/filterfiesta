@@ -1,6 +1,6 @@
 import pandas as pd
 from rdkit import Chem
-from rdkit.Chem.AllChem import CalcRMS
+from rdkit.Chem.rdMolAlign import CalcRMS # !!! changed AllChem to (alleged) correct submodule containing CalcRMS
 from rdkit.Geometry import Point3D
 import numpy as np
 from tqdm import tqdm
@@ -38,25 +38,29 @@ class Similarity:
         for i in tqdm(range(len(self.scores)//N)):
             Mol_RMSD=[]
             MolGroup=[]
+
+            # Work on N ligands at a time, should all be conformers of the same molecule
             for j in range(N):
                 MolGroup.append(next(self.ligands))
 
+            # Calculate the average atomic positions across the 10 conformers
             conformers=[mol.GetConformer() for mol in MolGroup]
             positions= np.stack([conf.GetPositions() for conf in conformers])
             average_pos=np.mean(positions,axis=0)
 
-
-
+            # Create a reference molecule with average atom positions
             reference_molecule= Chem.Mol(MolGroup[0])
             reference_conf=reference_molecule.GetConformer()
             for atomIndex in range(reference_molecule.GetNumAtoms()):
                 x, y, z = average_pos[atomIndex]
                 reference_conf.SetAtomPosition(atomIndex, Point3D(x, y, z))
 
+            # Calculate RMSD between each N-th ligand and the average reference molecule
             for mol in MolGroup:
                 rmsd = CalcRMS(mol,reference_molecule)
                 Mol_RMSD.append(rmsd)
 
+            # Average over N calculated RMSDs
             for j in range(N):
                 RMSDs.append(np.mean(Mol_RMSD))
             RMSD_group=[]
