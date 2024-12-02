@@ -6,6 +6,8 @@ from tqdm import tqdm
 from sklearn.metrics import jaccard_score
 import numpy as np
 
+from sklearn.utils.multiclass import type_of_target
+
 class Fingerprint:
     def __init__(self,proteinfile,ligandfile):
 
@@ -50,7 +52,7 @@ class Fingerprint:
         return self.pd_fp_explicit
 
 
-    def calculate_jaccard(self,reference_vector):
+    def calculate_jaccard(self,reference_vector, fingerprint):
         """
         Calculates the Jaccard score between a binary reference vector and each row of the pd_fp_explicit DataFrame.
 
@@ -64,15 +66,24 @@ class Fingerprint:
         if self.pd_fp_explicit is None:
             raise ValueError("Make sure to calculate the fingerprints first.")
 
-        if len(reference_vector) != self.pd_fp_explicit.shape[1]:
-            raise ValueError("The reference vector length must match the number of columns in the fingerprint, i.e., 8 time the number of residues")
+        #!!!! moved to the protocol file since it would have always given an error no matter what
+        #if len(reference_vector) != self.pd_fp_explicit.shape[1]:
+            #raise ValueError("The reference vector length must match the number of columns in the fingerprint, i.e., 8 time the number of residues")
 
-        # Convert the reference vector to a numpy array if it's not already
-        reference_vector = np.array(reference_vector)
+        # Convert the reference vector to a 1D numpy array if it's not already
+        #reference_vector = np.array(reference_vector.loc[0].values)
         # Calculate Jaccard scores for each row
+        print(f"type check: {type_of_target(reference_vector)}")
+        reference_vector = reference_vector.values.flatten()  # Already 2D if it's a DataFrame
+
+        print(f"type check: {type_of_target(reference_vector)}")
+
         jaccard_scores = []
-        for index, row in tqdm(self.pd_fp_explicit.iterrows(),total=len(self.pd_fp_explicit)):
-            score = jaccard_score(reference_vector, row.values)
+        for index, row in tqdm(fingerprint.iterrows(),total=len(fingerprint)): # !!! WITH NEW PROTEINS DOESN'T WORK ANYMORE
+            print(f"type check: {type_of_target(row)}")
+            row = row.values.flatten()
+            print(f"type check: {type_of_target(row)}")
+            score = jaccard_score(reference_vector, row, average='binary')
             jaccard_scores.append(score)
 
         return jaccard_scores

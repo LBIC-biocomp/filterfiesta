@@ -103,6 +103,7 @@ class Similarity:
         writer = Chem.SDWriter(sdf_path)
         print(f"Writing file: {sdf_path}")
         for i in bestscore.index:
-            writer.write(self.ligands[i])
+            m = Chem.rdmolops.AddHs(self.ligands[i],addCoords=True) # !!! added hidrogens before saving molecules
+            writer.write(m)
 
         writer.close()

@@ -10,7 +10,7 @@ class Cluster:
     def __init__(self,path):
         suppl = Chem.SDMolSupplier(path)
         morgan_gen = rdFingerprintGenerator.GetMorganGenerator(radius=4, fpSize=1024)
-        print("Generating fingerprints...")
+        print("Generating Morgan fingerprints...")
         self.fps = [morgan_gen.GetFingerprint(mol) for mol in tqdm(suppl) if mol is not None]
 
     def calculate_cluster(self,cutoff=0.2):
