@@ -9,8 +9,6 @@ import gzip
 import numpy as np
 import csv
 
-from sklearn.utils.multiclass import type_of_target
-
 from filterfiesta.cluster import Cluster
 
 
@@ -36,7 +34,7 @@ print("Score paths are:")
 suppliers=[Chem.rdmolfiles.SDMolSupplier(lig) for lig in ligands]
 scoredfs=[pd.read_csv(score,sep="\t") for score in scores]
 
-
+score_dfs = []
 # !!! removed i +=1 iteration. Would the original solution be more elegant?
 for supplier, score_df, score_path, lig in zip(suppliers,scoredfs,scores,ligands): # zip() receives iterables as arguments and pairs in order every i-th element of each iterable as a tuple
 
@@ -47,8 +45,8 @@ for supplier, score_df, score_path, lig in zip(suppliers,scoredfs,scores,ligands
 	print(f"Calculating conformer similarity for ligands in {lig} ...")
 	f=Similarity(supplier,score_df)
 	f.groupByN()
-	f.writeBestScore(sdf_out,csv_out,"FRED Chemgauss4 score","Title",key=lambda s: s.map(lambda x: int(x.split("_")[-1])))
-
+	f.writeBestScore(sdf_out,csv_out,"FRED Chemgauss4 score","Title",key=lambda s: s.map(lambda x: int(x.split("_")[-1]))) # !!! Key Da rivedere, forse da togliere o da rendere una funzione a se stante
+	score_dfs.append(f.scores) # !!! maybe f.scores is not in the same order as new score file saved as .best_score
 print(f"Done.")
 
 
@@ -93,13 +91,10 @@ all_residues=[]
 for rec,lig in zip(receptors,best_ligands):
 	f=Fingerprint(rec,lig)
 	residues=f.get_residues()
-	all_residues += [residues]
-
-# convert list of lists into flat list (list of lists is needed later)
-flat_all_residues = [x for res in all_residues for x in res]
+	all_residues += residues
 
 # keep only unique residues and sort them by residue number
-unique_residues = list(set(flat_all_residues))
+unique_residues = list(set(all_residues))
 unique_residues.sort(key=lambda x: int(x[5:].split('-')[0]))
 
 # Save the complete list of unique residues
@@ -107,9 +102,8 @@ with open("All_residues.csv", "w", newline="") as file:
     writer = csv.writer(file)
     writer.writerow(unique_residues)
 
-empty_df = pd.DataFrame(columns=unique_residues) # Create an empty dataframe with the unique residues as columns, will be the template for the following ones
-print(f"type check: {type_of_target(empty_df)}") # !!! GIVES "UNKNOWN" TYPE
-
+empty_df = pd.DataFrame(columns=unique_residues) # !!! Add dictionary with datatype bool. Create an empty dataframe with the unique residues as columns, will be the template for the following ones
+empty_df = empty_df.astype(int) # !!! DAJE
 
 
 # Create reference vectors
@@ -130,11 +124,10 @@ for ref in ref_residues:
     # Initialize the new DataFrame with all values set to 1
     new_df = pd.DataFrame(1, index=[0], columns=residues_ia)
 
-    print(f"type check: {type_of_target(new_df)}")
+
 
     # Concatenate with the empty DataFrame
     reference_vector = pd.concat([empty_df, new_df], ignore_index=True).fillna(0)
-    print(f"type check: {type_of_target(reference_vector)}") # !!! CHANGES TYPE FROM MULTI-LABEL TO UNKNOWN
     reference_vectors.append(reference_vector)
 
     # Save the new DataFrame as a .npy file
@@ -145,12 +138,13 @@ print(f"Done.")
 
 
 # Create fingerprints and directly write them to a file
-for rec,lig,res in zip(receptors,best_ligands,all_residues):
+for rec,lig in zip(receptors,best_ligands):
 	similarities = []
 
 	print(f"Calculating fingerprint for {lig} ...")
 	f=Fingerprint(rec,lig)
-	table=f.plif(res)
+
+	table=f.plif()
 	print(f"Creating table")
 	sorted_table = pd.concat([empty_df, table], ignore_index=True).fillna(0)
 	output_file=lig.replace("sdf","fingerprint.csv.gz") # !!!! output name now derives from ligands name and not rec name
@@ -162,13 +156,13 @@ for rec,lig,res in zip(receptors,best_ligands,all_residues):
 
 	# Calculate Jaccard index
 	for ref in reference_vectors:
-		print(f"type check: {type_of_target(ref)}")
+
 		if ref.shape[1] != sorted_table.shape[1]:
 			raise ValueError("The reference vector length must match the number of columns in the fingerprint, i.e., 8 time the number of residues")
 
 		print(f"Calculating Jaccard index between {lig} and reference fingerprints  ...")
 		similarity=f.calculate_jaccard(ref, sorted_table) # !!! NOT WORKING YET
-		print(f"type check: {type_of_target(ref)}")
+
 		similarities.append(similarity)
 
 	similarities=pd.DataFrame(similarities).T # Transpose dataframe (columns to indexes and vice versa)
@@ -196,5 +190,5 @@ for lig in best_ligands:
 	p=pd.DataFrame([numbers,centroids]).T
 	p.columns=["Cluster Number","Cluster centroid"]
 
-	output_file = lig.replace(".sdf", f".Clusters_cutoff0.3.csv") # !!! hot to automatically include selected cutoff  value in output path?
+	output_file = lig.replace(".sdf", f".Clusters_cutoff0.3.csv") # !!! how to automatically include selected cutoff  value in output path?
 	p.to_csv("Clusters_cutoff0.3.csv",index=False)

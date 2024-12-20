@@ -12,7 +12,7 @@ class Similarity:
         # Initialize "Group RMSD" column in dataframe
         self.scores["Group RMSD"]=pd.NA
 
-    def groupByN(self, N=10):
+    def groupByN(self, N=10): # !!! N=10 is too restrictive, assumes compounds are ordered by name
         """
         Groups ligands from `self.ligands` into batches of size N, computes the RMS distance for each ligand
         in a group relative to the average coordinates of the group, and updates `self.scores` with the mean RMS
@@ -103,7 +103,7 @@ class Similarity:
         writer = Chem.SDWriter(sdf_path)
         print(f"Writing file: {sdf_path}")
         for i in bestscore.index:
-            m = Chem.rdmolops.AddHs(self.ligands[i],addCoords=True) # !!! added hidrogens before saving molecules
+            m = Chem.rdmolops.AddHs(self.ligands[i],addCoords=True) # !!! added hydrogens before saving molecules
             writer.write(m)
 
         writer.close()

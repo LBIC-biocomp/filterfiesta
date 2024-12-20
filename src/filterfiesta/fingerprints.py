@@ -39,7 +39,8 @@ class Fingerprint:
 
         return fp_column_descriptor
 
-    def plif(self, column_descriptor):
+    def plif(self):
+        column_descriptor = self.get_residues()
         fp=[]
         for mol in tqdm(self.ligands):
             mol=oddt.toolkit.Molecule(mol)
@@ -73,16 +74,14 @@ class Fingerprint:
         # Convert the reference vector to a 1D numpy array if it's not already
         #reference_vector = np.array(reference_vector.loc[0].values)
         # Calculate Jaccard scores for each row
-        print(f"type check: {type_of_target(reference_vector)}")
         reference_vector = reference_vector.values.flatten()  # Already 2D if it's a DataFrame
 
-        print(f"type check: {type_of_target(reference_vector)}")
 
         jaccard_scores = []
         for index, row in tqdm(fingerprint.iterrows(),total=len(fingerprint)): # !!! WITH NEW PROTEINS DOESN'T WORK ANYMORE
-            print(f"type check: {type_of_target(row)}")
+            
             row = row.values.flatten()
-            print(f"type check: {type_of_target(row)}")
+            
             score = jaccard_score(reference_vector, row, average='binary')
             jaccard_scores.append(score)
 
