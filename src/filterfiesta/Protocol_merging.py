@@ -15,7 +15,7 @@ from filterfiesta.cluster import Cluster
 
 
 #######################################################
-# 0-POSE SIMILARITY
+# 1-DOCKING SCORE
 
 # fetching paths for ligands' .sdf files and docking score files
 ligands=glob.glob("*sdf")
@@ -25,6 +25,11 @@ ligands=[x for x in ligands if "best" not in x]
 scores=[lig.replace(".sdf","_score.txt") for lig in ligands]
 scores.sort()
 
+receptors=glob.glob("*pdb")
+receptors.sort()
+
+print("The receptors are:")
+[print(f"-{x}") for x in receptors]
 print("Ligand paths are:")
 [print(f"-{x}") for x in ligands]
 print("Score paths are:")
@@ -34,6 +39,22 @@ print("Score paths are:")
 # Convert .sdf paths into RDKit's suppliers and .csv paths to pandas dataframes
 suppliers=[Chem.rdmolfiles.SDMolSupplier(lig) for lig in ligands]
 scoredfs=[pd.read_csv(score,sep="\t") for score in scores]
+
+# Add column with receptor name to all score dfs
+for df,rec,suppl in zip(scoredfs,receptors,suppliers):
+    rec_name = rec.replace(".pdb","")
+    df = df.assign(Receptor=rec_name)
+    df = df[(df["FRED Chemgauss4 score"]<-12)]
+    writer=Chem.rdmolfiles.SDWriter(f"{rec_name}_selection.sdf")
+    for i in df.index:
+        writer.write(suppl[i])
+    writer.close()
+
+
+
+
+#######################################################
+# 2-AVERAGE CONFORMER RMSD
 
 score_dfs = []
 # !!! removed i +=1 iteration. Would the original solution be more elegant?
@@ -57,7 +78,7 @@ print(f"Done.")
 
 
 #############################################################
-# 1-CALCULATE FINGERPRINT, 2-COMPARE FINGERPRINT
+# 3-INTERACTION FINGERPRINTS
 
 # !!!!! insert here existing file check
 
@@ -66,13 +87,10 @@ pd.set_option('future.no_silent_downcasting', True)
 # Load all input files, 20 initial molecules and full database files are processed together
 best_ligands=glob.glob("*best*sdf")
 best_ligands.sort()
-receptors=glob.glob("*pdb")
-receptors.sort()
+
 ref_residues=glob.glob("reference*txt")
 ref_residues.sort()
 
-print("The receptors are:")
-[print(f"-{x}") for x in receptors]
 print("The ligands are:")
 [print(f"-{x}") for x in best_ligands]
 print("The references are:")
@@ -172,15 +190,15 @@ for rec,lig,score_df in zip(receptors,best_ligands,score_dfs):
 	similarities.to_csv(lig.split("/")[-1].replace("sdf","overlap.csv"),index=False)
 
 
-print(f"Done. Finished.")
+print(f"Done.")
+
 
 
 
 
 
 #######################################################
-# 3-CLUSTER
-
+# 3-BUTINA CLUSTERING
 
 file="..\\0-PoseSimilarity\\OK_C1_Top10Percent_dockHD.bestpose.sdf"
 
@@ -199,3 +217,6 @@ for lig,score_df,score_path in zip(best_ligands,score_dfs,scores):
 
 	csv_out=score_path.replace("txt","complete_table.csv")
 	score_df.to_csv(csv_out,index=False)
+
+
+print(f"Done. Finished.")
