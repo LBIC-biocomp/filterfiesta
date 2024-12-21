@@ -107,3 +107,5 @@ class Similarity:
             writer.write(m)
 
         writer.close()
+
+        return bestscore

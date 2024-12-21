@@ -21,6 +21,7 @@ from filterfiesta.cluster import Cluster
 ligands=glob.glob("*sdf")
 ligands.sort()
 ligands=[x for x in ligands if "best" not in x]
+
 scores=[lig.replace(".sdf","_score.txt") for lig in ligands]
 scores.sort()
 
@@ -45,8 +46,8 @@ for supplier, score_df, score_path, lig in zip(suppliers,scoredfs,scores,ligands
 	print(f"Calculating conformer similarity for ligands in {lig} ...")
 	f=Similarity(supplier,score_df)
 	f.groupByN()
-	f.writeBestScore(sdf_out,csv_out,"FRED Chemgauss4 score","Title",key=lambda s: s.map(lambda x: int(x.split("_")[-1]))) # !!! Key Da rivedere, forse da togliere o da rendere una funzione a se stante
-	score_dfs.append(f.scores) # !!! maybe f.scores is not in the same order as new score file saved as .best_score
+	bestscore = f.writeBestScore(sdf_out,csv_out,"FRED Chemgauss4 score","Title",key=lambda s: s.map(lambda x: int(x.split("_")[-1]))) # !!! Key Da rivedere, forse da togliere o da rendere una funzione a se stante
+	score_dfs.append(bestscore) # !!! maybe f.scores is not in the same order as new score file saved as .best_score
 print(f"Done.")
 
 
@@ -138,7 +139,7 @@ print(f"Done.")
 
 
 # Create fingerprints and directly write them to a file
-for rec,lig in zip(receptors,best_ligands):
+for rec,lig,score_df in zip(receptors,best_ligands,score_dfs):
 	similarities = []
 
 	print(f"Calculating fingerprint for {lig} ...")
@@ -155,18 +156,19 @@ for rec,lig in zip(receptors,best_ligands):
 
 
 	# Calculate Jaccard index
-	for ref in reference_vectors:
+	for ref,path in zip(reference_vectors,ref_residues):
 
 		if ref.shape[1] != sorted_table.shape[1]:
 			raise ValueError("The reference vector length must match the number of columns in the fingerprint, i.e., 8 time the number of residues")
 
 		print(f"Calculating Jaccard index between {lig} and reference fingerprints  ...")
-		similarity=f.calculate_jaccard(ref, sorted_table) # !!! NOT WORKING YET
-
+		similarity=f.calculate_jaccard(ref, sorted_table)
+		score_df[path.split("/")[-1].replace(".txt","")] = similarity
 		similarities.append(similarity)
 
 	similarities=pd.DataFrame(similarities).T # Transpose dataframe (columns to indexes and vice versa)
 	similarities.columns= [path.split("/")[-1].replace(".txt","") for path in ref_residues]
+
 	similarities.to_csv(lig.split("/")[-1].replace("sdf","overlap.csv"),index=False)
 
 
@@ -182,13 +184,18 @@ print(f"Done. Finished.")
 
 file="..\\0-PoseSimilarity\\OK_C1_Top10Percent_dockHD.bestpose.sdf"
 
-for lig in best_ligands:
+for lig,score_df,score_path in zip(best_ligands,score_dfs,scores):
 
 	c=Cluster(lig)
 	numbers, centroids=c.cluster(cutoff=0.3)
 
 	p=pd.DataFrame([numbers,centroids]).T
 	p.columns=["Cluster Number","Cluster centroid"]
+	score_df["Cluster Number"] = numbers.astype(int)
+	score_df["Cluster centroid"] = centroids.astype(int)
 
 	output_file = lig.replace(".sdf", f".Clusters_cutoff0.3.csv") # !!! how to automatically include selected cutoff  value in output path?
 	p.to_csv("Clusters_cutoff0.3.csv",index=False)
+
+	csv_out=score_path.replace("txt","complete_table.csv")
+	score_df.to_csv(csv_out,index=False)
