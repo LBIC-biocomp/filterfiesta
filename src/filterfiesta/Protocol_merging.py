@@ -4,6 +4,9 @@ import pandas as pd
 from rdkit import Chem
 from tqdm import tqdm
 
+import tempfile
+import os
+
 from filterfiesta.fingerprints import Fingerprint
 import gzip
 import numpy as np
@@ -15,7 +18,8 @@ from filterfiesta.cluster import Cluster
 
 
 #######################################################
-# 1-DOCKING SCORE
+# 0-INPUT FILE PREPARATION
+
 
 # fetching paths for ligands' .sdf files and docking score files
 ligands=glob.glob("*sdf")
@@ -38,17 +42,44 @@ print("Score paths are:")
 
 # Convert .sdf paths into RDKit's suppliers and .csv paths to pandas dataframes
 suppliers=[Chem.rdmolfiles.SDMolSupplier(lig) for lig in ligands]
-scoredfs=[pd.read_csv(score,sep="\t") for score in scores]
+score_dfs=[pd.read_csv(score,sep="\t") for score in scores]
 
-# Add column with receptor name to all score dfs
-for df,rec,suppl in zip(scoredfs,receptors,suppliers):
+
+
+
+
+
+#######################################################
+# 1-DOCKING SCORE
+
+
+temp_score_names = []
+
+for score_df,rec,supplier in zip(score_dfs,receptors,suppliers):
+
+    # Add column with receptor name to score dataframe
     rec_name = rec.replace(".pdb","")
-    df = df.assign(Receptor=rec_name)
-    df = df[(df["FRED Chemgauss4 score"]<-12)]
-    writer=Chem.rdmolfiles.SDWriter(f"{rec_name}_selection.sdf")
-    for i in df.index:
-        writer.write(suppl[i])
+    score_df = score_df.assign(Receptor=rec_name)
+
+    #filter based on selected score threshold
+    score_df = score_df[(score_df["FRED Chemgauss4 score"]<-12)] # !!! needs to be adapted to user input
+																# !!!! Maybe it could eliminate some conformers so not everyone has 10 as it should be
+	# Create a temporary file
+    temp_score = tempfile.NamedTemporaryFile(suffix='.sdf', delete=False)  # Prevent deletion upon closing
+    temp_score.close()  # Close it to allow RDKit access
+
+    writer = Chem.rdmolfiles.SDWriter(temp_score.name)
+
+	# Write selected molecules to temp file for next step
+    for i in score_df.index:
+        if supplier[i] is not None: # !!! what happens if it is indeed None?
+            writer.write(supplier[i])
     writer.close()
+
+	# Save temp names for next step
+    temp_score_names.append(temp_score.name)
+
+
 
 
 
@@ -56,21 +87,41 @@ for df,rec,suppl in zip(scoredfs,receptors,suppliers):
 #######################################################
 # 2-AVERAGE CONFORMER RMSD
 
-score_dfs = []
-# !!! removed i +=1 iteration. Would the original solution be more elegant?
-for supplier, score_df, score_path, lig in zip(suppliers,scoredfs,scores,ligands): # zip() receives iterables as arguments and pairs in order every i-th element of each iterable as a tuple
 
-	sdf_out=lig.replace("sdf","bestpose.sdf")
-	csv_out=score_path.replace("txt","bestpose.csv")
-	print(f"output will be {sdf_out}")
+temp_rmsd_names = []
 
+for temp_score, score_df, score_path, lig in zip(temp_score_names,score_dfs,scores,ligands): # zip() receives iterables as arguments and pairs in order every i-th element of each iterable as a tuple
+
+	# Create supplier from previous temp file
+	temp_supplier = Chem.rdmolfiles.SDMolSupplier(temp_score)
+
+	# Create new temporary file
+	temp_rmsd = tempfile.NamedTemporaryFile(suffix='.sdf', delete=False)  # Prevent deletion upon closing
+	temp_rmsd.close()  # Close it to allow RDKit access
+	sdf_out=temp_rmsd.name
+
+	# Calculate average conformer RMSD
 	print(f"Calculating conformer similarity for ligands in {lig} ...")
-	f=Similarity(supplier,score_df)
+	f=Similarity(temp_supplier,score_df)
 	f.groupByN()
-	bestscore = f.writeBestScore(sdf_out,csv_out,"FRED Chemgauss4 score","Title",key=lambda s: s.map(lambda x: int(x.split("_")[-1]))) # !!! Key Da rivedere, forse da togliere o da rendere una funzione a se stante
-	score_dfs.append(bestscore) # !!! maybe f.scores is not in the same order as new score file saved as .best_score
-print(f"Done.")
 
+	# Write selected molecules to temp file for next step
+	rmsd_cutoff = 1
+	bestscore = f.writeBestScore(sdf_out, "FRED Chemgauss4 score","Title", cutoff=rmsd_cutoff, key=lambda s: s.map(lambda x: int(x.split("_")[-1]))) # !!! Key Da rivedere, forse da togliere o da rendere una funzione a se stante
+
+	# Update score dataframe
+	score_df = bestscore
+
+	# Save temp names for next step
+	temp_rmsd_names.append(temp_rmsd.name)
+
+	# Delete supplier from previous temp file
+	del temp_supplier
+
+	# Delete previous temp file
+	os.unlink(temp_score)
+
+print(f"Done.")
 
 
 
@@ -79,6 +130,7 @@ print(f"Done.")
 
 #############################################################
 # 3-INTERACTION FINGERPRINTS
+
 
 # !!!!! insert here existing file check
 
@@ -202,17 +254,21 @@ print(f"Done.")
 
 file="..\\0-PoseSimilarity\\OK_C1_Top10Percent_dockHD.bestpose.sdf"
 
+
 for lig,score_df,score_path in zip(best_ligands,score_dfs,scores):
 
 	c=Cluster(lig)
-	numbers, centroids=c.cluster(cutoff=0.3)
+
+	cutoff = 0.6 # !!! needs to be adapted to user input
+
+	numbers, centroids=c.cluster(cutoff=cutoff)
 
 	p=pd.DataFrame([numbers,centroids]).T
 	p.columns=["Cluster Number","Cluster centroid"]
 	score_df["Cluster Number"] = numbers.astype(int)
 	score_df["Cluster centroid"] = centroids.astype(int)
 
-	output_file = lig.replace(".sdf", f".Clusters_cutoff0.3.csv") # !!! how to automatically include selected cutoff  value in output path?
+	output_file = lig.replace(".sdf", f".Clusters_cutoff{cutoff}.csv") # !!! how to automatically include selected cutoff  value in output path?
 	p.to_csv("Clusters_cutoff0.3.csv",index=False)
 
 	csv_out=score_path.replace("txt","complete_table.csv")

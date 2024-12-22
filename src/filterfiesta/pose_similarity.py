@@ -67,7 +67,7 @@ class Similarity:
             MolGroup=[]
         self.scores["Group RMSD"]=RMSDs
 
-    def writeBestScore(self, sdf_path, score_path, ScoreColumnName="score", MolColumn="Title", ascending=True,key=None):
+    def writeBestScore(self, sdf_path, score_path=None, ScoreColumnName="score", MolColumn="Title", cutoff=1, ascending=True,key=None):
         """
         Writes the best scoring ligands to an SDF file and their corresponding scores to a CSV file.
 
@@ -94,10 +94,12 @@ class Similarity:
         bestscore.drop_duplicates(subset=MolColumn, inplace=True)
         bestscore.sort_values(MolColumn, inplace=True, ascending=ascending,key=key)
 
-
+        # Update dataframe with only molecules within selected RMSD cutoff
+        bestscore = bestscore[(bestscore["Group RMSD"]<cutoff)]
+        # !!! removed score save
         # Save the best scores to a CSV file
-        print(f"Writing file: {score_path}")
-        bestscore.to_csv(score_path, index=False)
+        #print(f"Writing file: {score_path}")
+        #bestscore.to_csv(score_path, index=False)
 
         # Write the corresponding ligands to the SDF file
         writer = Chem.SDWriter(sdf_path)
