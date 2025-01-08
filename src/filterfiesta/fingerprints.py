@@ -40,11 +40,20 @@ class Fingerprint:
         return fp_column_descriptor
 
     def plif(self):
+        standard_resids=[res.resid for res in self.protein.residues] #ids of standard residues
+        keep_columns=[] #create boolean vector to filter fingerprint columns
+        for resid in np.unique(self.protein.atom_dict['resid']): #for each id of all residues
+            if resid in standard_resids:
+                keep_columns+=[1,1,1,1,1,1,1,1] #retain the 8 bits of fignerprints corresponding to the standard residue
+            else:
+                keep_columns+=[0,0,0,0,0,0,0,0] #discard the 8 bits for non standard residue
+
         column_descriptor = self.get_residues()
         fp=[]
         for mol in tqdm(self.ligands):
             mol=oddt.toolkit.Molecule(mol)
             plif = InteractionFingerprint(mol,self.protein)
+            plif = plif[:,keep_columns]
             fp.append(plif)
 
         self.pd_fp_explicit = pd.DataFrame(fp,columns=column_descriptor)
@@ -79,9 +88,9 @@ class Fingerprint:
 
         jaccard_scores = []
         for index, row in tqdm(fingerprint.iterrows(),total=len(fingerprint)): # !!! WITH NEW PROTEINS DOESN'T WORK ANYMORE
-            
+
             row = row.values.flatten()
-            
+
             score = jaccard_score(reference_vector, row, average='binary')
             jaccard_scores.append(score)
 

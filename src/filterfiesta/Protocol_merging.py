@@ -17,6 +17,8 @@ from filterfiesta.cluster import Cluster
 
 
 
+
+
 #######################################################
 # 0-INPUT FILE PREPARATION
 
@@ -46,6 +48,53 @@ score_dfs=[pd.read_csv(score,sep="\t") for score in scores]
 
 
 
+# Reorder elements in ordere to match dataframes and suppliers
+for score_df, supplier in zip(score_dfs,suppliers):
+
+	# Check if lenghts match
+	if len(supplier) != len(score_df):
+		raise ValueError("Lenghts of score table and sdf file are not matching")
+
+	# Sort score dataframe by title and, secundarily, by score
+	score_df = score_df.sort_values(by=["Title", "FRED Chemgauss4 score"], ascending=True, key=lambda s: s.map(lambda x: int(x.split("_")[-1])) if s.name == "Title" else s)
+
+
+	# Create a dataframe containing titles and scores properties from the sdf
+	df = pd.DataFrame()
+
+	titles = []
+	scores = []
+
+	for i in range(len(supplier)):
+		mol = supplier[i]
+
+		title = mol.GetProp("_Name")
+		titles.append(title)
+
+		score = mol.GetProp("FRED Chemgauss4 score")
+		scores.append(float(score))
+
+	df["Title"] = titles
+	df["FRED Chemgauss4 score"] = scores
+
+	# Sort dataframe of sdf properties
+	df = df.sort_values(by=["Title", "FRED Chemgauss4 score"], ascending=True, key=lambda s: s.map(lambda x: int(x.split("_")[-1])) if s.name == "Title" else s)
+
+
+	# Check if the two dataframe match
+	if score_df["Title"].to_list() != df["Title"].to_list():
+		raise ValueError("Title columns not matching")
+	else:
+		print("Title columns matching")
+
+	if score_df["FRED Chemgauss4 score"].to_list() != df["FRED Chemgauss4 score"].to_list():
+		raise ValueError("Score columns not matching")
+	else:
+		print("Score columns matching")
+
+
+	# Add column to score dataframe with order of sampling from supplier
+	score_df["Supplier order"] = df.index
 
 
 
