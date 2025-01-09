@@ -33,15 +33,20 @@ class Similarity:
         - `self.ligands` and `self.scores` must have the same length, with molecules in the same order.
         - The RMS distance measures how much a ligand's coordinates deviate from the average coordinates of the group.
         """
+
+        # Create a dataframe with all the unique molecule titles, each with the number of occurences in score dataframe: it corresponds to the number of conformers for each molecule
+        size_df = self.scores.groupby(self.scores["Title"].tolist(),as_index=False).size().sort_values('index', ascending=True, ignore_index=True, key=lambda s: s.map(lambda x: int(x.split("_")[-1])))
+
+
         RMSDs=[]
-        print(f"Calculating pose similarities for each group of {N} molecules...")
-        for i in tqdm(range(len(self.scores)//N)):
+        print(f"Calculating pose similarities for each group of conformers...")
+        for i in tqdm(range(len(size_df))):
             Mol_RMSD=[]
             MolGroup=[]
 
             # Work on N ligands at a time, should all be conformers of the same molecule
-            for j in range(N):
-                MolGroup.append(next(self.ligands))
+            for j in range(size_df["size"][i]):
+                MolGroup.append(self.ligands[next(iter(self.scores["Supplier order"]))]) # uses the indexes of the supplier, but ordered with respect to molecule title
 
             # Calculate the average atomic positions across the 10 conformers
             conformers=[mol.GetConformer() for mol in MolGroup]
@@ -61,13 +66,14 @@ class Similarity:
                 Mol_RMSD.append(rmsd)
 
             # Average over N calculated RMSDs
-            for j in range(N):
+            for j in range(size_df["size"][i]):
                 RMSDs.append(np.mean(Mol_RMSD))
             RMSD_group=[]
             MolGroup=[]
         self.scores["Group RMSD"]=RMSDs
 
-    def writeBestScore(self, sdf_path, score_path=None, ScoreColumnName="score", MolColumn="Title", cutoff=1, ascending=True,key=None):
+
+    def writeBestScore(self, ScoreColumnName="score", MolColumn="Title", cutoff=1, ascending=True,key=None):
         """
         Writes the best scoring ligands to an SDF file and their corresponding scores to a CSV file.
 
@@ -102,12 +108,13 @@ class Similarity:
         #bestscore.to_csv(score_path, index=False)
 
         # Write the corresponding ligands to the SDF file
-        writer = Chem.SDWriter(sdf_path)
-        print(f"Writing file: {sdf_path}")
-        for i in bestscore.index:
-            m = Chem.rdmolops.AddHs(self.ligands[i],addCoords=True) # !!! added hydrogens before saving molecules
-            writer.write(m)
+        # !!! removed sdf save
+        #writer = Chem.SDWriter(sdf_path)
+        #print(f"Writing file: {sdf_path}")
+        #for i in bestscore.index:
+            #m = Chem.rdmolops.AddHs(self.ligands[i],addCoords=True) # !!! added hydrogens before saving molecules
+            #writer.write(m)
 
-        writer.close()
+        #writer.close()
 
         return bestscore
