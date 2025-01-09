@@ -45,8 +45,9 @@ print("Score paths are:")
 suppliers=[Chem.rdmolfiles.SDMolSupplier(lig) for lig in ligands]
 score_dfs_0=[pd.read_csv(score,sep="\t") for score in score_paths]
 
-
+# create new empty list to be populated with the updated score dataframes, repeat at each step, since modifying them inside the for loop will leave them unchanged outside of it
 score_dfs_1 = []
+
 # Match the order of score dataframes and suppliers, add receptor column
 for score_df, supplier, rec in zip(score_dfs_0,suppliers, receptors):
 
@@ -187,7 +188,6 @@ empty_df = empty_df.astype(int) # !!! DAJE
 ia_types = ["VDW","AR-FF","AR-EF","HBD","HBA","I+","I-","ME",]
 
 
-
 # Create fingerprints and directly write them to a file
 for rec,lig,supplier,score_df in zip(receptors,ligands,suppliers,score_dfs_3):
 
@@ -195,12 +195,21 @@ for rec,lig,supplier,score_df in zip(receptors,ligands,suppliers,score_dfs_3):
 	f=Fingerprint(rec,supplier,score_df)
 
 	table=f.plif()
+
 	print(f"Creating table")
 	sorted_table = pd.concat([empty_df, table], ignore_index=True).fillna(0)
 
+	# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! SEEMS THAT ALL FINGERPRINT BITS ARE == 0, UNSURE WHY, COULD BE THE ISSUE AS TO WHY ALL MOLECULES GET DISCARDED
+
+	#print(f"fingerprint columns {list(table.columns)}")
+	#for i in range(len(sorted_table)):
+		#if sorted_table.iloc[i].sum() != 0:
+			#print(i)
+		#else:
+			#print("no")
 
 	# Create reference vectors and calculate Jaccard index
-	for ref, fp_cutoff in zip(ref_residues, fp_cutoffs):
+	for ref in ref_residues:
 		print(f"Creating reference vectors...")
   		# Read the original columns from the reference file
 		residues_df = pd.read_csv(ref, header=None)[0]
@@ -213,13 +222,12 @@ for rec,lig,supplier,score_df in zip(receptors,ligands,suppliers,score_dfs_3):
 
 		# Initialize the new DataFrame with all values set to 1
 		new_df = pd.DataFrame(1, index=[0], columns=residues_ia)
-
+		#OK print(f"reference dataframe {list(new_df.loc[0])}")
 
 		# Concatenate with the empty DataFrame
 		reference_vector = pd.concat([empty_df, new_df], ignore_index=True).fillna(0)
+		#OK print(f"reference dataframe {list(reference_vector.loc[0].astype(int))}")
 
-		print(f"ref vector {reference_vector.shape[1]}")
-		print(f"sortd table {sorted_table.shape[1]}")
 		# Check lengths
 		if reference_vector.shape[1] != sorted_table.shape[1]:
 			raise ValueError("The reference vector length must match the number of columns in the fingerprint, i.e., 8 time the number of residues")
@@ -229,12 +237,14 @@ for rec,lig,supplier,score_df in zip(receptors,ligands,suppliers,score_dfs_3):
 		similarity=f.calculate_jaccard(reference_vector, sorted_table)
 
 		# Add fingerprint similarity column to score dataframe
-		score_df[ref.split("/")[-1].replace(".txt","")] = similarity
-
+		col_name = ref.split("/")[-1].replace(".txt","")
+		score_df[col_name] = similarity
+		score_df.to_csv()
        	# Select only molecules complying with the selected cutoff for the specific reference fingerprint
-		score_df = score_df[(score_df[ref.split("/")[-1].replace(".txt","")]>fp_cutoff)] # !!! needs to adapt to user input
+		score_df = score_df[(score_df[col_name]>fp_cutoffs[0])] # !!! needs to adapt to user input
 		print(f"Molecule saved: {len(score_df)}")
-		score_dfs_4.append(score_df)
+
+	score_dfs_4.append(score_df)
 
 print(f"Done.")
 

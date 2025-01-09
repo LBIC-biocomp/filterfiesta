@@ -41,8 +41,9 @@ class Fingerprint:
         return fp_column_descriptor
 
     def plif(self):
-        standard_resids=[res.id for res in self.protein.residues] # ids of standard residues
-        #["{}:{}{}".format(res.chain,res.name,res.number) for res in self.protein.residues]
+        standard_resids=["{}:{}{}".format(res.chain,res.name,res.number) for res in self.protein.residues] # ids of standard residues
+        #[res.resid for res in self.protein.residues] this and also res.id both gave errors
+
 
         keep_columns=[] #create boolean vector to filter fingerprint columns
         for resid in np.unique(self.protein.atom_dict['resid']): #for each id of all residues
@@ -54,10 +55,10 @@ class Fingerprint:
         column_descriptor = self.get_residues()
         fp=[]
         for i in tqdm(self.scores["Supplier order"]):
-            mol = self.ligands[i]
-            mol=oddt.toolkit.Molecule(mol)
+            mol0 = self.ligands[i]
+            mol=oddt.toolkit.Molecule(mol0)
             plif = InteractionFingerprint(mol,self.protein)
-            plif = plif[keep_columns]
+            plif = plif[keep_columns] # !!!!!!! previous form plif[:,keep_columns] gave shape issues, unsure if this breaks things or not
             fp.append(plif)
 
         self.pd_fp_explicit = pd.DataFrame(fp,columns=column_descriptor)
