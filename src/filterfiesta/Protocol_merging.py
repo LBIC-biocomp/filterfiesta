@@ -116,7 +116,7 @@ for score_df,supplier in zip(score_dfs_1,suppliers):
 
     #filter based on selected score threshold
 	score_df = score_df[(score_df["FRED Chemgauss4 score"]<score_cutoff)]
-	print(f"Saved molecules: {len(score_df)}")
+	print(f"Score Saved molecules: {len(score_df)}")
 	score_dfs_2.append(score_df)
 
 score_dfs_1 = []
@@ -137,7 +137,7 @@ for supplier, score_df, lig in zip(suppliers,score_dfs_2,ligands): # zip() recei
 	f.groupByN()
 
 	bestscore = f.writeBestScore("FRED Chemgauss4 score","Title", cutoff=rmsd_cutoff, key=lambda s: s.map(lambda x: int(x.split("_")[-1]))) # !!! Key Da rivedere, forse da togliere o da rendere una funzione a se stante
-
+	print(f"RMSD Saved molecules: {len(bestscore)}")
 	# Update score dataframe
 	score_dfs_3.append(bestscore)
 
@@ -244,6 +244,7 @@ for rec,lig,supplier,score_df in zip(receptors,ligands,suppliers,score_dfs_3):
 		score_df = score_df[(score_df[col_name]>fp_cutoffs[0])] # !!! needs to adapt to user input
 		print(f"Molecule saved: {len(score_df)}")
 
+	print(f"plif Saved molecules: {len(score_df)}")
 	score_dfs_4.append(score_df)
 
 print(f"Done.")

@@ -33,6 +33,7 @@ class Fingerprint:
         "I-",
         "ME",
         ]
+
         res_code = ["{}:{}{}".format(res.chain,res.name,res.number) for res in self.protein.residues]
         for res in res_code:
             for ia in ia_type:
@@ -41,24 +42,30 @@ class Fingerprint:
         return fp_column_descriptor
 
     def plif(self):
-        standard_resids=["{}:{}{}".format(res.chain,res.name,res.number) for res in self.protein.residues] # ids of standard residues
+        standard_resids=[res.idx for res in self.protein.residues] # ids of standard residues
         #[res.resid for res in self.protein.residues] this and also res.id both gave errors
 
 
         keep_columns=[] #create boolean vector to filter fingerprint columns
         for resid in np.unique(self.protein.atom_dict['resid']): #for each id of all residues
             if resid in standard_resids:
-                keep_columns+=[1,1,1,1,1,1,1,1] #retain the 8 bits of fignerprints corresponding to the standard residue
+                keep_columns+=[True]*8 #retain the 8 bits of fignerprints corresponding to the standard residue
             else:
-                keep_columns+=[0,0,0,0,0,0,0,0] #discard the 8 bits for non standard residue
+                keep_columns+=[False]*8 #discard the 8 bits for non standard residue
 
+        print(f"std res {standard_resids}")
+        print(f"np coso {np.unique(self.protein.atom_dict['resid'])}")
+        print(f"keep columns {sum(keep_columns)}")
+        print(f"keep columns {len(keep_columns)}")
         column_descriptor = self.get_residues()
         fp=[]
         for i in tqdm(self.scores["Supplier order"]):
             mol0 = self.ligands[i]
             mol=oddt.toolkit.Molecule(mol0)
             plif = InteractionFingerprint(mol,self.protein)
+            print(plif.shape)
             plif = plif[keep_columns] # !!!!!!! previous form plif[:,keep_columns] gave shape issues, unsure if this breaks things or not
+
             fp.append(plif)
 
         self.pd_fp_explicit = pd.DataFrame(fp,columns=column_descriptor)
@@ -92,7 +99,7 @@ class Fingerprint:
 
 
         jaccard_scores = []
-        for index, row in tqdm(fingerprint.iterrows(),total=len(fingerprint)): # !!! WITH NEW PROTEINS DOESN'T WORK ANYMORE
+        for index, row in tqdm(fingerprint.iterrows(),total=len(fingerprint)):
 
             row = row.values.flatten()
 

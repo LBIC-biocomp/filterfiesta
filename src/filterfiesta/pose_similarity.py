@@ -45,7 +45,7 @@ class Similarity:
             MolGroup=[]
 
             # Work on N ligands at a time, should all be conformers of the same molecule
-            for j in range(size_df["size"][i]):
+            for j in range(size_df["size"][i]): # !!!!!! to be updated with alternative code without "iter()"
                 MolGroup.append(self.ligands[next(iter(self.scores["Supplier order"]))]) # uses the indexes of the supplier, but ordered with respect to molecule title
 
             # Calculate the average atomic positions across the 10 conformers
