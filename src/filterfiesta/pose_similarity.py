@@ -12,7 +12,7 @@ class Similarity:
         # Initialize "Group RMSD" column in dataframe
         self.scores["Group RMSD"]=pd.NA
 
-    def groupByN(self, N=10): # !!! N=10 is too restrictive, assumes compounds are ordered by name
+    def groupByN(self, N=10):
         """
         Groups ligands from `self.ligands` into batches of size N, computes the RMS distance for each ligand
         in a group relative to the average coordinates of the group, and updates `self.scores` with the mean RMS
@@ -33,44 +33,88 @@ class Similarity:
         - `self.ligands` and `self.scores` must have the same length, with molecules in the same order.
         - The RMS distance measures how much a ligand's coordinates deviate from the average coordinates of the group.
         """
-
-        # Create a dataframe with all the unique molecule titles, each with the number of occurences in score dataframe: it corresponds to the number of conformers for each molecule
-        size_df = self.scores.groupby(self.scores["Title"].tolist(),as_index=False).size().sort_values('index', ascending=True, ignore_index=True, key=lambda s: s.map(lambda x: int(x.split("_")[-1])))
-
-
         RMSDs=[]
-        print(f"Calculating pose similarities for each group of conformers...")
-        for i in tqdm(range(len(size_df))):
+        print(f"Calculating pose similarities for each group of {N} molecules...")
+        for i in tqdm(range(len(self.scores)//N)):
             Mol_RMSD=[]
             MolGroup=[]
+            for j in range(N):
+                MolGroup.append(next(self.ligands))
 
-            # Work on N ligands at a time, should all be conformers of the same molecule
-            for j in range(size_df["size"][i]): # !!!!!! to be updated with alternative code without "iter()"
-                MolGroup.append(self.ligands[next(iter(self.scores["Supplier order"]))]) # uses the indexes of the supplier, but ordered with respect to molecule title
-
-            # Calculate the average atomic positions across the 10 conformers
             conformers=[mol.GetConformer() for mol in MolGroup]
             positions= np.stack([conf.GetPositions() for conf in conformers])
             average_pos=np.mean(positions,axis=0)
 
-            # Create a reference molecule with average atom positions
+
+
             reference_molecule= Chem.Mol(MolGroup[0])
             reference_conf=reference_molecule.GetConformer()
             for atomIndex in range(reference_molecule.GetNumAtoms()):
                 x, y, z = average_pos[atomIndex]
                 reference_conf.SetAtomPosition(atomIndex, Point3D(x, y, z))
 
-            # Calculate RMSD between each N-th ligand and the average reference molecule
             for mol in MolGroup:
                 rmsd = CalcRMS(mol,reference_molecule)
                 Mol_RMSD.append(rmsd)
 
-            # Average over N calculated RMSDs
-            for j in range(size_df["size"][i]):
+            for j in range(N):
                 RMSDs.append(np.mean(Mol_RMSD))
             RMSD_group=[]
             MolGroup=[]
         self.scores["Group RMSD"]=RMSDs
+
+    def groupByName(self, name_column):
+        """
+        Groups ligands from `self.ligands` into batches of molecules with the same name, computes the RMS distance for each ligand
+        in a group relative to the average coordinates of the group, and updates `self.scores` with the mean RMS
+        distance of each group. Both `self.scores` and `self.ligands` must be of the same length and represent
+        the same molecules in the same order.
+
+        Process:
+        1. The ligands are divided into groups of molecules from `self.ligands`.
+        2. For each group of ligands, the RMS distance of each ligand to the average ligand (based on their coordinates)
+        is calculated.
+        3. The mean RMS distance of each group is computed.
+        4. The mean RMS value for each group is added to the corresponding index in `self.scores`.
+
+        Parameters:
+        - name_column (str):  The column containing mol names used to group together for RMS distance calculation.
+
+        Notes:
+        - `self.ligands` and `self.scores` must have the same length, with molecules in the same order.
+        - The RMS distance measures how much a ligand's coordinates deviate from the average coordinates of the group.
+        """
+        names_df=self.scores[name_column].value_counts()
+        names=names_df.index
+        self.scores["Group RMSD"]=pd.NA
+        print(f"Calculating pose similarities for {len(names_df)} unique molecules...")
+        for i in tqdm(range(len(names_df))):
+            filtered_scores=self.scores[self.scores[name_column]==names[i]]
+            ids=filtered_scores["Supplier order"]
+            Mol_RMSD=[]
+            MolGroup=[]
+            for id_order in ids:
+                MolGroup.append(self.ligands[id_order])
+
+            conformers=[mol.GetConformer() for mol in MolGroup]
+            positions= np.stack([conf.GetPositions() for conf in conformers])
+            average_pos=np.mean(positions,axis=0)
+
+
+
+            reference_molecule= Chem.Mol(MolGroup[0])
+            reference_conf=reference_molecule.GetConformer()
+            for atomIndex in range(reference_molecule.GetNumAtoms()):
+                x, y, z = average_pos[atomIndex]
+                reference_conf.SetAtomPosition(atomIndex, Point3D(x, y, z))
+
+            for mol in MolGroup:
+                rmsd = CalcRMS(mol,reference_molecule)
+                Mol_RMSD.append(rmsd)
+
+            for index in filtered_scores["Group RMSD"].index:
+                self.scores.loc[index, "Group RMSD"]=np.mean(Mol_RMSD)
+
 
 
     def writeBestScore(self, ScoreColumnName="score", MolColumn="Title", cutoff=1, ascending=True,key=None):

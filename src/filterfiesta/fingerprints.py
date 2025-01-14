@@ -42,7 +42,7 @@ class Fingerprint:
         return fp_column_descriptor
 
     def plif(self):
-        standard_resids=[res.idx for res in self.protein.residues] # ids of standard residues
+        standard_resids=[res.idx0 for res in self.protein.residues] # ids of standard residues
         #[res.resid for res in self.protein.residues] this and also res.id both gave errors
 
 
@@ -53,18 +53,13 @@ class Fingerprint:
             else:
                 keep_columns+=[False]*8 #discard the 8 bits for non standard residue
 
-        print(f"std res {standard_resids}")
-        print(f"np coso {np.unique(self.protein.atom_dict['resid'])}")
-        print(f"keep columns {sum(keep_columns)}")
-        print(f"keep columns {len(keep_columns)}")
         column_descriptor = self.get_residues()
         fp=[]
         for i in tqdm(self.scores["Supplier order"]):
             mol0 = self.ligands[i]
             mol=oddt.toolkit.Molecule(mol0)
             plif = InteractionFingerprint(mol,self.protein)
-            print(plif.shape)
-            plif = plif[keep_columns] # !!!!!!! previous form plif[:,keep_columns] gave shape issues, unsure if this breaks things or not
+            plif = plif[keep_columns]
 
             fp.append(plif)
 

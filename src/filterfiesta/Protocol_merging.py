@@ -107,46 +107,47 @@ for score_df, supplier, rec in zip(score_dfs_0,suppliers, receptors):
 
 score_dfs_0 = []
 #######################################################
-# 1-DOCKING SCORE
+# 1-AVERAGE CONFORMER RMSD
 
 score_dfs_2 = []
-score_cutoff = -12 # !!! needs to be adapted to user input
-
-for score_df,supplier in zip(score_dfs_1,suppliers):
-
-    #filter based on selected score threshold
-	score_df = score_df[(score_df["FRED Chemgauss4 score"]<score_cutoff)]
-	print(f"Score Saved molecules: {len(score_df)}")
-	score_dfs_2.append(score_df)
-
-score_dfs_1 = []
-
-
-#######################################################
-# 2-AVERAGE CONFORMER RMSD
-
-score_dfs_3 = []
 rmsd_cutoff = 1 # !!! needs to adapt to user input
 
 
-for supplier, score_df, lig in zip(suppliers,score_dfs_2,ligands): # zip() receives iterables as arguments and pairs in order every i-th element of each iterable as a tuple
+for supplier, score_df, lig in zip(suppliers,score_dfs_1,ligands): # zip() receives iterables as arguments and pairs in order every i-th element of each iterable as a tuple
 
 	# Calculate average conformer RMSD
 	print(f"Calculating conformer similarity for ligands in {lig} ...")
 	f=Similarity(supplier,score_df)
-	f.groupByN()
+	f.groupByName(name_column="Title")
 
 	bestscore = f.writeBestScore("FRED Chemgauss4 score","Title", cutoff=rmsd_cutoff, key=lambda s: s.map(lambda x: int(x.split("_")[-1]))) # !!! Key Da rivedere, forse da togliere o da rendere una funzione a se stante
 	print(f"RMSD Saved molecules: {len(bestscore)}")
 	# Update score dataframe
-	score_dfs_3.append(bestscore)
+	score_dfs_2.append(bestscore)
 
 print(f"Done.")
 
+score_dfs_1 = []
+
+
+
+
+
+
+#######################################################
+# 2-DOCKING SCORE
+
+score_dfs_3 = []
+score_cutoff = -12 # !!! needs to be adapted to user input
+
+for score_df,supplier in zip(score_dfs_2,suppliers):
+
+    #filter based on selected score threshold
+	score_df = score_df[(score_df["FRED Chemgauss4 score"]<score_cutoff)]
+	print(f"Score Saved molecules: {len(score_df)}")
+	score_dfs_3.append(score_df)
+
 score_dfs_2 = []
-
-
-
 
 #############################################################
 # 3-INTERACTION FINGERPRINTS
@@ -199,15 +200,6 @@ for rec,lig,supplier,score_df in zip(receptors,ligands,suppliers,score_dfs_3):
 	print(f"Creating table")
 	sorted_table = pd.concat([empty_df, table], ignore_index=True).fillna(0)
 
-	# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! SEEMS THAT ALL FINGERPRINT BITS ARE == 0, UNSURE WHY, COULD BE THE ISSUE AS TO WHY ALL MOLECULES GET DISCARDED
-
-	#print(f"fingerprint columns {list(table.columns)}")
-	#for i in range(len(sorted_table)):
-		#if sorted_table.iloc[i].sum() != 0:
-			#print(i)
-		#else:
-			#print("no")
-
 	# Create reference vectors and calculate Jaccard index
 	for ref in ref_residues:
 		print(f"Creating reference vectors...")
@@ -222,11 +214,9 @@ for rec,lig,supplier,score_df in zip(receptors,ligands,suppliers,score_dfs_3):
 
 		# Initialize the new DataFrame with all values set to 1
 		new_df = pd.DataFrame(1, index=[0], columns=residues_ia)
-		#OK print(f"reference dataframe {list(new_df.loc[0])}")
 
 		# Concatenate with the empty DataFrame
 		reference_vector = pd.concat([empty_df, new_df], ignore_index=True).fillna(0)
-		#OK print(f"reference dataframe {list(reference_vector.loc[0].astype(int))}")
 
 		# Check lengths
 		if reference_vector.shape[1] != sorted_table.shape[1]:
@@ -239,12 +229,13 @@ for rec,lig,supplier,score_df in zip(receptors,ligands,suppliers,score_dfs_3):
 		# Add fingerprint similarity column to score dataframe
 		col_name = ref.split("/")[-1].replace(".txt","")
 		score_df[col_name] = similarity
-		score_df.to_csv()
-       	# Select only molecules complying with the selected cutoff for the specific reference fingerprint
-		score_df = score_df[(score_df[col_name]>fp_cutoffs[0])] # !!! needs to adapt to user input
-		print(f"Molecule saved: {len(score_df)}")
 
-	print(f"plif Saved molecules: {len(score_df)}")
+       	# Select only molecules complying with the selected cutoff for the specific reference fingerprint
+		print(f"filtering based on {col_name}")
+		score_df = score_df[(score_df[col_name]>fp_cutoffs[0])] # !!! needs to adapt to user input
+
+	receptor = score_df["Receptor"].iloc[0]
+	print(f"plif Saved molecules {receptor}: {len(score_df)}")
 	score_dfs_4.append(score_df)
 
 print(f"Done.")
@@ -272,10 +263,17 @@ for lig, supplier, score_df, score_path in zip(ligands, suppliers, score_dfs_4, 
 
 	#p=pd.DataFrame([numbers,centroids]).T
 	#p.columns=["Cluster Number","Cluster centroid"]
-	score_df["Cluster Number"] = numbers.astype(int)
+	numbers = numbers.astype(int)
+	centroids = centroids.astype(int)
+
+	score_df = score_df.copy()
+
+	score_df["Cluster number"] = numbers.astype(int)
 	score_df["Cluster centroid"] = centroids.astype(int)
 
+	# Save centroids from 500 most populated cluster
 	score_df = score_df[(score_df["Cluster centroid"] == True)]
+	score_df = score_df[(score_df["Cluster number"] < 500)]
 
 	# Save selected molecules to sdf
 	writer = Chem.rdmolfiles.SDWriter(sdf_out)
