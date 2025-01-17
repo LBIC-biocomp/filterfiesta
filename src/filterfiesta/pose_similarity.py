@@ -87,7 +87,7 @@ class Similarity:
         names_df=self.scores[name_column].value_counts()
         names=names_df.index
         self.scores["Group RMSD"]=pd.NA
-        print(f"Calculating pose similarities for {len(names_df)} unique molecules...")
+#        print(f"Calculating pose similarities for {len(names_df)} unique molecules...")
         for i in tqdm(range(len(names_df))):
             filtered_scores=self.scores[self.scores[name_column]==names[i]]
             ids=filtered_scores["Supplier order"]
@@ -142,7 +142,7 @@ class Similarity:
         # Sort by the score and remove duplicates based on the molecule title
         bestscore.sort_values(ScoreColumnName, inplace=True, ascending=ascending)
         bestscore.drop_duplicates(subset=MolColumn, inplace=True)
-        bestscore.sort_values(MolColumn, inplace=True, ascending=ascending,key=key)
+        bestscore.sort_values(MolColumn, inplace=True, ascending=ascending)
 
         # Update dataframe with only molecules within selected RMSD cutoff
         bestscore = bestscore[(bestscore["Group RMSD"]<cutoff)]

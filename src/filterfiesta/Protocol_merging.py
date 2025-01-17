@@ -1,18 +1,11 @@
 import glob
-from filterfiesta.pose_similarity import Similarity
 import pandas as pd
 from rdkit import Chem
-from tqdm import tqdm
-
-import tempfile
-import os
 
 from filterfiesta.fingerprints import Fingerprint
-import gzip
-import numpy as np
-import csv
-
 from filterfiesta.cluster import Cluster
+from filterfiesta.pose_similarity import Similarity
+
 
 
 

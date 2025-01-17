@@ -33,12 +33,11 @@ class Fingerprint:
         "I-",
         "ME",
         ]
-
+        help(next(self.protein.residues))
         res_code = ["{}:{}{}".format(res.chain,res.name,res.number) for res in self.protein.residues]
         for res in res_code:
             for ia in ia_type:
                 fp_column_descriptor.append("{}-{}".format(res,ia))
-
         return fp_column_descriptor
 
     def plif(self):

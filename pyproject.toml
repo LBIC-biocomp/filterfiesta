@@ -30,6 +30,9 @@ dependencies = [
     "numba==0.60.0",
 ]
 
+[project.scripts]
+filterfiesta="filterfiesta.__main__:main"
+
 [project.optional-dependencies]
 spark = [
     "pyspark>=3.0.0"
