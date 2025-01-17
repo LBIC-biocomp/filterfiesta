@@ -63,6 +63,7 @@ class Fingerprint:
 
             fp.append(plif)
 
+        print("hasn't crashed yet")
         self.pd_fp_explicit = pd.DataFrame(fp,columns=column_descriptor)
         self.pd_fp_explicit = (self.pd_fp_explicit > 0).astype(int)
 
