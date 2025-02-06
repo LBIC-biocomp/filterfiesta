@@ -14,10 +14,10 @@ class Fingerprint:
         protein_rdkitmol=Chem.rdmolfiles.MolFromPDBFile(proteinfile)
         self.protein = oddt.toolkit.Molecule(protein_rdkitmol)
         self.protein.protein=True
-
         self.ligands=ligands
         self.scores=scores
         self.pd_fp_explicit = None
+        self.standard_list=['ACE', 'ALA', 'ALAD', 'ARG', 'ARGN', 'ASF', 'ASH', 'ASN', 'ASN1', 'ASP', 'ASPH', 'CALA', 'CARG', 'CASF', 'CASN', 'CASP', 'CCYS', 'CCYX', 'CGLN', 'CGLU', 'CGLY', 'CHID', 'CHIE', 'CHIP', 'CILE', 'CLEU', 'CLYS', 'CME', 'CMET', 'CPHE', 'CPRO', 'CSER', 'CTHR', 'CTRP', 'CTYR', 'CVAL', 'CYM', 'CYS', 'CYS1', 'CYS2', 'CYSH', 'CYX', 'DAB', 'GLH', 'GLN', 'GLU', 'GLUH', 'GLY', 'HID', 'HIE', 'HIP', 'HIS', 'HIS1', 'HIS2', 'HISA', 'HISB', 'HISD', 'HISE', 'HISH', 'HSD', 'HSE', 'HSP', 'HYP', 'ILE', 'LEU', 'LYN', 'LYS', 'LYSH', 'MET', 'MSE', 'NALA', 'NARG', 'NASN', 'NASP', 'NCYS', 'NCYX', 'NGLN', 'NGLU', 'NGLY', 'NHID', 'NHIE', 'NHIP', 'NILE', 'NLEU', 'NLYS', 'NME', 'NMET', 'NPHE', 'NPRO', 'NSER', 'NTHR', 'NTRP', 'NTYR', 'NVAL', 'ORN', 'PGLU', 'PHE', 'PRO', 'QLN', 'SER', 'THR', 'TRP', 'TYR', 'VAL']
 
     def get_residues(self):
 
@@ -33,18 +33,15 @@ class Fingerprint:
         "I-",
         "ME",
         ]
-        help(next(self.protein.residues))
-        res_code = ["{}:{}{}".format(res.chain,res.name,res.number) for res in self.protein.residues]
+
+        res_code = ["{}:{}{}".format(res.chain,res.name,res.number) for res in self.protein.residues if res.name in self.standard_list]
         for res in res_code:
             for ia in ia_type:
                 fp_column_descriptor.append("{}-{}".format(res,ia))
         return fp_column_descriptor
 
     def plif(self):
-        standard_resids=[res.idx0 for res in self.protein.residues] # ids of standard residues
-        #[res.resid for res in self.protein.residues] this and also res.id both gave errors
-
-
+        standard_resids=[res.idx0 for res in self.protein.residues if res.name in self.standard_list]# ids of standard residues
         keep_columns=[] #create boolean vector to filter fingerprint columns
         for resid in np.unique(self.protein.atom_dict['resid']): #for each id of all residues
             if resid in standard_resids:
@@ -62,7 +59,6 @@ class Fingerprint:
 
             fp.append(plif)
 
-        print("hasn't crashed yet")
         self.pd_fp_explicit = pd.DataFrame(fp,columns=column_descriptor)
         self.pd_fp_explicit = (self.pd_fp_explicit > 0).astype(int)
 

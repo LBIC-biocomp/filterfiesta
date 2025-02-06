@@ -55,7 +55,4 @@ class Cluster:
                 cluster_number[molecule]=i
             cluster_centroid[cluster[0]]=1
 
-        #for i in range(10): !!! what was the purpose?
-            #print(len(clusters[i]))
-
         return (cluster_number,cluster_centroid)

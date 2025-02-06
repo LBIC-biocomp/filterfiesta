@@ -7,10 +7,11 @@ from rdkit import Chem
 import time
 import tqdm
 
+from itertools import chain
+
 from filterfiesta.fingerprints import Fingerprint
 from filterfiesta.cluster import Cluster
 from filterfiesta.pose_similarity import Similarity
-
 from filterfiesta.cluster import Cluster
 
 def create_parser():
@@ -79,7 +80,7 @@ def create_parser():
         -1 to deactivate the filter, 0 keep molecules with at least one common interaction with reference, 1 only molecules with a perfect match. Defaults to 0."
     )
     parser.add_argument(
-        "--cluster_cutoff",
+        "--clustering_cutoff",
         type=float,
         default=0.6,
         help="Jaccard similarity cutoff (range 0-1) for Butina clustering. Defaults to 0.6."
@@ -99,6 +100,12 @@ def create_parser():
         "-sep","--separator",
         default=",",
         help="Separator used to load and convert the score files into dataframes."
+    )
+
+    parser.add_argument(
+        "-split","--split",
+        action="store_true",
+        help="If specified, all filtered inputs are NOT grouped together before clustering, resulting in a single output for each input file."
     )
 
 
@@ -199,10 +206,11 @@ def docking_score_filter(input_dfs, suppliers,docked_molecules, score_column, sc
         score_df = score_df[(score_df[score_column]<score_cutoff)]
         print(f"{lig}... {len(score_df)} passed.")
         new_score_dfs.append(score_df)
-    print("--- Done. %s seconds ---" % int(time.time() - start_time))
+    print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
     return new_score_dfs
 
 def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, docked_molecules):
+    start_time = time.time()
     new_score_dfs = []
     pd.set_option('future.no_silent_downcasting', True)
 
@@ -212,8 +220,6 @@ def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, dock
     all_residues=[]
     for rec, supplier, score_df in zip(receptors, suppliers, input_dfs):
         f=Fingerprint(rec,supplier,score_df)
-        help(f.protein.residues)
-        quit()
         residues=f.get_residues()
         all_residues += residues
     # keep only unique residues and sort them by residue number
@@ -272,8 +278,49 @@ def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, dock
         print(f"plif Saved molecules {receptor}: {len(score_df)}")
         new_score_dfs.append(score_df)
 
-    print(f"Done.")
+    print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
     return new_score_dfs
+
+def cluster_filter(input_dfs,suppliers,clustering_cutoff,clusters_to_save, grouped):
+    start_time = time.time()
+    print("Clustering molecules....")
+    new_score_dfs = []
+    if grouped:
+        concatenated_dfs=input_dfs[0].copy()
+        for i in range(1,len(input_dfs)):
+            df= input_dfs[i].copy()
+            df["Original Supplier order"]=df["Supplier order"].map(int)
+            df["Supplier order"]=df["Supplier order"]+sum([len(table) for table in input_dfs[:i]])
+            concatenated_dfs=pd.concat([concatenated_dfs,df])
+        new_supplier=[]
+        for sup in suppliers:
+            new_supplier+=list(sup)
+        suppliers=[new_supplier]
+        input_dfs=[concatenated_dfs]
+
+    for supplier, score_df in zip(suppliers, input_dfs):
+        c=Cluster(supplier, score_df)
+        numbers, centroids=c.cluster(cutoff=clustering_cutoff)
+        numbers = numbers.astype(int)
+        centroids = centroids.astype(int)
+
+        score_df = score_df.copy()
+
+        score_df["Cluster number"] = numbers.astype(int)
+        score_df["Cluster centroid"] = centroids.astype(int)
+
+        # Save centroids from 500 most populated cluster
+        score_df = score_df[(score_df["Cluster centroid"] == True)]
+        score_df = score_df[(score_df["Cluster number"] < clusters_to_save)]
+        if 'Original Supplier order' in score_df.columns:
+            score_df['Supplier order']=score_df['Original Supplier order']
+            score_df.drop('Original Supplier order',axis=1,inplace=True)
+        new_score_dfs.append(score_df)
+
+    print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
+    return new_score_dfs
+
+
 
 
 def main():
@@ -288,6 +335,7 @@ def main():
 
     if not args.sdf_score_property:
         args.sdf_score_property=args.score_column
+
 
     suppliers=[Chem.rdmolfiles.SDMolSupplier(lig) for lig in args.docked_molecules]
     dfs=[pd.read_csv(score,sep=args.separator) for score in args.docked_scores]
@@ -312,13 +360,19 @@ def main():
                                               score_column=args.score_column,
                                               score_cutoff=args.score_cutoff)
 
-    # plif_filtrd_dfs=plif_filter(filtered_docking_dfs,
-    #                             reference_file=args.residues_reference,
-    #                             plif_cutoff=args.plif_cutoff,
-    #                             receptors=args.receptors,
-    #                             suppliers=suppliers,
-    #                             docked_molecules=args.docked_molecules
-    #                             )
+    plif_filtered_dfs=plif_filter(filtered_docking_dfs,
+                                reference_file=args.residues_reference,
+                                plif_cutoff=args.plif_cutoff,
+                                receptors=args.receptors,
+                                suppliers=suppliers,
+                                docked_molecules=args.docked_molecules
+                                )
+    clusterd_dfs=cluster_filter(input_dfs=plif_filtered_dfs,
+                                suppliers=suppliers,
+                                clustering_cutoff=args.clustering_cutoff,
+                                clusters_to_save=args.output_size,
+                                grouped=not args.split)
+
 
 if __name__ == "__main__":
     main()
