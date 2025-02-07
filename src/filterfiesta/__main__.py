@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 
 import argparse
-import glob
 import pandas as pd
 from rdkit import Chem
 import time
-import tqdm
-
 from itertools import chain
+from pathlib import Path
 
 from filterfiesta.fingerprints import Fingerprint
 from filterfiesta.cluster import Cluster
@@ -274,8 +272,7 @@ def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, dock
             # Select only molecules complying with the selected cutoff for the specific reference fingerprint
             print(f"filtering based on {col_name}")
             score_df = score_df[(score_df[col_name]>plif_cutoff)]
-        receptor = score_df["Receptor"].iloc[0]
-        print(f"plif Saved molecules {receptor}: {len(score_df)}")
+            print(f"{lig}... {len(score_df)} passed.")
         new_score_dfs.append(score_df)
 
     print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
@@ -313,6 +310,7 @@ def cluster_filter(input_dfs,suppliers,clustering_cutoff,clusters_to_save, group
         score_df = score_df[(score_df["Cluster centroid"] == True)]
         score_df = score_df[(score_df["Cluster number"] < clusters_to_save)]
         if 'Original Supplier order' in score_df.columns:
+            score_df['Concatenated Supplier order']=score_df['Supplier order']
             score_df['Supplier order']=score_df['Original Supplier order']
             score_df.drop('Original Supplier order',axis=1,inplace=True)
         new_score_dfs.append(score_df)
@@ -321,6 +319,32 @@ def cluster_filter(input_dfs,suppliers,clustering_cutoff,clusters_to_save, group
     return new_score_dfs
 
 
+def save(input_dfs,docked_scores, docked_molecules, suppliers,output_suffix, grouped):
+    start_time = time.time()
+    print("Writing output files...")
+    if grouped:
+        new_supplier=[]
+        for sup in suppliers:
+            new_supplier+=list(sup)
+        suppliers=[new_supplier]
+
+    for (df, input_csv,input_sdf, supplier) in zip(input_dfs,docked_scores,docked_molecules,suppliers):
+        input_csv_path=Path(input_csv)
+        output_csv_path=f"{input_csv_path.stem}{output_suffix}{input_csv_path.suffix}"
+        input_sdf_path=Path(input_sdf)
+        output_sdf_path=f"{input_sdf_path.stem}{output_suffix}{input_sdf_path.suffix}"
+
+        if 'Concatenated Supplier order' in df.columns:
+            selected_mols = [supplier[i] for i in df['Concatenated Supplier order'] if supplier[i] is not None]
+            df.drop('Concatenated Supplier order',axis=1,inplace=True)
+        else:
+            selected_mols = [supplier[i] for i in df['Supplier order'] if supplier[i] is not None]
+        df.drop('Supplier order',axis=1,inplace=True)
+        with Chem.SDWriter(output_sdf_path) as writer:
+            for mol in selected_mols:
+                writer.write(mol)
+        df.to_csv(output_csv_path,index=False)
+    print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
 
 
 def main():
@@ -373,6 +397,11 @@ def main():
                                 clusters_to_save=args.output_size,
                                 grouped=not args.split)
 
-
+    save(input_dfs=clusterd_dfs,
+         docked_scores=args.docked_scores,
+         docked_molecules=args.docked_molecules,
+         suppliers=suppliers,
+         output_suffix=args.output_suffix,
+         grouped=not args.split)
 if __name__ == "__main__":
     main()
