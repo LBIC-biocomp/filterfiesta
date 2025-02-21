@@ -117,7 +117,7 @@ class Similarity:
 
 
 
-    def writeBestScore(self, ScoreColumnName="score", MolColumn="Title", cutoff=1, ascending=True,key=None):
+    def writeBestScore(self, ScoreColumnName="score", MolColumn="Title", cutoff=1, ascending=True,key=None, filter=True):
         """
         Writes the best scoring ligands to an SDF file and their corresponding scores to a CSV file.
 
@@ -135,6 +135,9 @@ class Similarity:
         3. Writes the filtered scores to the specified `score_path` as a CSV file.
         4. Writes the corresponding ligands to the specified `sdf_path` in SDF format.
         """
+        if not filter:
+            return self.scores
+
         # Create a copy of scores to work with
         bestscore = self.scores.copy()
         bestscore.reset_index(inplace=True)

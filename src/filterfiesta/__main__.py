@@ -106,6 +106,12 @@ def create_parser():
         help="If specified, all filtered inputs are NOT grouped together before clustering, resulting in a single output for each input file."
     )
 
+    parser.add_argument(
+        "-sv","--save_all",
+        action="store_true",
+        help="If specified, the input mulecules are NOT filtered in the steps before clustering, ressulting in an addition output table containing all the measured properties for all the molecules."
+    )
+
 
     args = parser.parse_args()
     return args
@@ -174,7 +180,7 @@ def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_col
     print("--- Done. %s seconds ---" % int(time.time() - start_time))
     return new_score_dfs
 
-def average_conformer_rmsd(input_score_dfs, suppliers,docked_molecules, title_column, score_column, rmsd_cutoff):
+def average_conformer_rmsd(input_score_dfs, suppliers,docked_molecules, title_column, score_column, rmsd_cutoff,filter):
     start_time = time.time()
     new_score_dfs=[]
     print(f"\nCalculating average conformer RMSD...")
@@ -184,7 +190,7 @@ def average_conformer_rmsd(input_score_dfs, suppliers,docked_molecules, title_co
         f=Similarity(supplier,score_df)
         f.groupByName(name_column=title_column)
 
-        grouped_scores = f.writeBestScore(score_column,title_column, cutoff=rmsd_cutoff)
+        grouped_scores = f.writeBestScore(score_column,title_column, cutoff=rmsd_cutoff, filter=filter)
         # Update score dataframe
         new_score_dfs.append(grouped_scores)
 
@@ -194,20 +200,21 @@ def average_conformer_rmsd(input_score_dfs, suppliers,docked_molecules, title_co
     print("--- Done. %s seconds ---" % int(time.time() - start_time))
     return new_score_dfs
 
-def docking_score_filter(input_dfs, suppliers,docked_molecules, score_column, score_cutoff):
+def docking_score_filter(input_dfs, suppliers,docked_molecules, score_column, score_cutoff,filter):
     start_time = time.time()
     new_score_dfs=[]
     print("\nIt's time for limbo!")
     print(f"Retaining molecules with score below {score_cutoff}:")
     for lig,score_df,supplier in zip(docked_molecules,input_dfs,suppliers):
         #filter based on selected score threshold
-        score_df = score_df[(score_df[score_column]<score_cutoff)]
+        if filter:
+            score_df = score_df[(score_df[score_column]<score_cutoff)]
         print(f"{lig}... {len(score_df)} passed.")
         new_score_dfs.append(score_df)
     print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
     return new_score_dfs
 
-def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, docked_molecules):
+def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, docked_molecules,filter):
     start_time = time.time()
     new_score_dfs = []
     pd.set_option('future.no_silent_downcasting', True)
@@ -228,7 +235,6 @@ def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, dock
     empty_df = pd.DataFrame(columns=unique_residues) # !!! Add dictionary with datatype bool. Create an empty dataframe with the unique residues as columns, will be the template for the following ones
     empty_df = empty_df.astype(int)
     ia_types = ["VDW","AR-FF","AR-EF","HBD","HBA","I+","I-","ME",]
-
 
     # Create fingerprints
     for rec,lig,supplier,score_df in zip(receptors,docked_molecules,suppliers,input_dfs):
@@ -271,7 +277,8 @@ def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, dock
 
             # Select only molecules complying with the selected cutoff for the specific reference fingerprint
             print(f"filtering based on {col_name}")
-            score_df = score_df[(score_df[col_name]>plif_cutoff)]
+            if filter:
+                score_df = score_df[(score_df[col_name]>plif_cutoff)]
             print(f"{lig}... {len(score_df)} passed.")
         new_score_dfs.append(score_df)
 
@@ -369,39 +376,53 @@ def main():
                                          title_column=args.title_column,
                                          score_column=args.score_column,
                                          sdf_molecule_name=args.sdf_title_property,
-                                         sdf_score_property=args.sdf_score_property)
+                                         sdf_score_property=args.sdf_score_property,
+                                        )
 
     rmsd_filtered_dfs=average_conformer_rmsd(right_order_dfs,
                                              suppliers=suppliers,
                                              docked_molecules=args.docked_molecules,
                                              title_column=args.title_column,
                                              score_column=args.score_column,
-                                             rmsd_cutoff=args.rmsd_cutoff,)
+                                             rmsd_cutoff=args.rmsd_cutoff,
+                                             filter=not args.save_all)
 
     filtered_docking_dfs=docking_score_filter(rmsd_filtered_dfs,
                                               suppliers=suppliers,
                                               docked_molecules=args.docked_molecules,
                                               score_column=args.score_column,
-                                              score_cutoff=args.score_cutoff)
+                                              score_cutoff=args.score_cutoff,
+                                              filter=not args.save_all)
 
     plif_filtered_dfs=plif_filter(filtered_docking_dfs,
                                 reference_file=args.residues_reference,
                                 plif_cutoff=args.plif_cutoff,
                                 receptors=args.receptors,
                                 suppliers=suppliers,
-                                docked_molecules=args.docked_molecules
+                                docked_molecules=args.docked_molecules,
+                                filter=not args.save_all
                                 )
-    clusterd_dfs=cluster_filter(input_dfs=plif_filtered_dfs,
-                                suppliers=suppliers,
-                                clustering_cutoff=args.clustering_cutoff,
-                                clusters_to_save=args.output_size,
-                                grouped=not args.split)
 
-    save(input_dfs=clusterd_dfs,
+    if args.save_all:
+        save(input_dfs=plif_filtered_dfs,
          docked_scores=args.docked_scores,
          docked_molecules=args.docked_molecules,
          suppliers=suppliers,
          output_suffix=args.output_suffix,
-         grouped=not args.split)
+         grouped=True)
+
+    else:
+        clusterd_dfs=cluster_filter(input_dfs=plif_filtered_dfs,
+                                    suppliers=suppliers,
+                                    clustering_cutoff=args.clustering_cutoff,
+                                    clusters_to_save=args.output_size,
+                                    grouped=not args.split)
+
+        save(input_dfs=clusterd_dfs,
+            docked_scores=args.docked_scores,
+            docked_molecules=args.docked_molecules,
+            suppliers=suppliers,
+            output_suffix=args.output_suffix,
+            grouped=not args.split)
 if __name__ == "__main__":
     main()
