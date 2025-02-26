@@ -337,9 +337,13 @@ def save(input_dfs,docked_scores, docked_molecules, suppliers,output_suffix, gro
 
     for (df, input_csv,input_sdf, supplier) in zip(input_dfs,docked_scores,docked_molecules,suppliers):
         input_csv_path=Path(input_csv)
-        output_csv_path=f"{input_csv_path.stem}{output_suffix}{input_csv_path.suffix}"
+        output_csv_path=f"{input_csv_path.stem}_{output_suffix}{input_csv_path.suffix}"
         input_sdf_path=Path(input_sdf)
-        output_sdf_path=f"{input_sdf_path.stem}{output_suffix}{input_sdf_path.suffix}"
+        output_sdf_path=f"{input_sdf_path.stem}_{output_suffix}{input_sdf_path.suffix}"
+
+        if grouped:
+            output_csv_path=f"grouped_{output_suffix}{input_csv_path.suffix}"
+            output_sdf_path=f"grouped_{output_suffix}{input_sdf_path.suffix}"
 
         if 'Concatenated Supplier order' in df.columns:
             selected_mols = [supplier[i] for i in df['Concatenated Supplier order'] if supplier[i] is not None]
@@ -349,6 +353,7 @@ def save(input_dfs,docked_scores, docked_molecules, suppliers,output_suffix, gro
         df.drop('Supplier order',axis=1,inplace=True)
         with Chem.SDWriter(output_sdf_path) as writer:
             for mol in selected_mols:
+                mol= Chem.rdmolops.AddHs(mol,addCoords=True)
                 writer.write(mol)
         df.to_csv(output_csv_path,index=False)
     print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
