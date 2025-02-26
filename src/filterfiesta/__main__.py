@@ -294,7 +294,7 @@ def cluster_filter(input_dfs,suppliers,clustering_cutoff,clusters_to_save, group
         for i in range(1,len(input_dfs)):
             df= input_dfs[i].copy()
             df["Original Supplier order"]=df["Supplier order"].map(int)
-            df["Supplier order"]=df["Supplier order"]+sum([len(table) for table in input_dfs[:i]])
+            df["Supplier order"]=df["Supplier order"]+sum([len(supplier) for supplier in suppliers[:i]])
             concatenated_dfs=pd.concat([concatenated_dfs,df])
         new_supplier=[]
         for sup in suppliers:
@@ -407,6 +407,12 @@ def main():
                                 docked_molecules=args.docked_molecules,
                                 filter=not args.save_all
                                 )
+
+    a=plif_filtered_dfs
+    print(a[0][:10])
+    titles = [mol.GetProp("_Name") if mol is not None and mol.HasProp("_Name") else "Untitled" for mol in suppliers[0]]
+    print([titles[x] for x in a[0]["Supplier order"][:10]])
+
 
     if args.save_all:
         save(input_dfs=plif_filtered_dfs,

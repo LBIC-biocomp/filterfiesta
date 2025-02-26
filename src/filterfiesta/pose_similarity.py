@@ -145,7 +145,7 @@ class Similarity:
         # Sort by the score and remove duplicates based on the molecule title
         bestscore.sort_values(ScoreColumnName, inplace=True, ascending=ascending)
         bestscore.drop_duplicates(subset=MolColumn, inplace=True)
-        bestscore.sort_values(MolColumn, inplace=True, ascending=ascending)
+        bestscore.sort_values(by=[MolColumn, ScoreColumnName], ascending=True, ignore_index=True,inplace=True)
 
         # Update dataframe with only molecules within selected RMSD cutoff
         bestscore = bestscore[(bestscore["Group RMSD"]<cutoff)]
