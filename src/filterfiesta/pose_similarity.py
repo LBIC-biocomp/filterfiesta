@@ -65,7 +65,7 @@ class Similarity:
         self.scores["Group RMSD"]=RMSDs
         '''
 
-    def groupByName(self, name_column):
+    def groupByName(self, name_column, secondary_column=None):
         """
         Groups ligands from `self.ligands` into batches of molecules with the same name, computes the RMS distance for each ligand
         in a group relative to the average coordinates of the group, and updates `self.scores` with the mean RMS
@@ -86,12 +86,22 @@ class Similarity:
         - `self.ligands` and `self.scores` must have the same length, with molecules in the same order.
         - The RMS distance measures how much a ligand's coordinates deviate from the average coordinates of the group.
         """
-        names_df=self.scores[name_column].value_counts()
-        names=names_df.index
+        if secondary_column:
+            group_keys = self.scores.groupby([name_column, secondary_column]).size()
+        else:
+            group_keys = self.scores.groupby([name_column]).size()
+
         self.scores["Group RMSD"]=pd.NA
 
-        for i in tqdm(range(len(names_df))):
-            filtered_scores=self.scores[self.scores[name_column]==names[i]]
+        for i, group_key in enumerate(tqdm(group_keys.index)):
+            if secondary_column:
+                primary_val, secondary_val = group_key  # group_key is a tuple e.g. ("MolA", "common_name_1")
+                filtered_scores = self.scores[
+                    (self.scores[name_column] == primary_val) &
+                    (self.scores[secondary_column] == secondary_val)
+                ]
+            else:
+                filtered_scores = self.scores[self.scores[name_column] == group_key]
             ids=filtered_scores["Supplier order"]
             Mol_RMSD=[]
             MolGroup=[]
@@ -99,6 +109,19 @@ class Similarity:
                 MolGroup.append(self.ligands[id_order])
 
             conformers=[mol.GetConformer() for mol in MolGroup]
+
+            atom_counts = [mol.GetNumAtoms() for mol in MolGroup]
+            if len(set(atom_counts)) > 1:
+                if secondary_column:
+                    raise ValueError(
+                        f"Molecule group with title: '{group_key[0]}' and secondary property '{group_key[1]} has conformers with different atom counts: {atom_counts}. "
+                        f"Check for duplicate names assigned to different structures in your SDF."
+                )
+                else:
+                    raise ValueError(
+                        f"Molecule group with title: '{group_key[0]}' has conformers with different atom counts: {atom_counts}. "
+                        f"Check for duplicate names assigned to different structures in your SDF."
+                )
             positions= np.stack([conf.GetPositions() for conf in conformers])
             average_pos=np.mean(positions,axis=0)
 
@@ -116,7 +139,7 @@ class Similarity:
                 self.scores.loc[index, "Group RMSD"]=np.mean(Mol_RMSD)
 
 
-    def writeBestScore(self, ScoreColumnName="score", MolColumn="Title", cutoff=1, ascending=True,key=None, filter=True):
+    def writeBestScore(self, ScoreColumnName="score", MolColumn="Title", secondary_column=None, cutoff=1, ascending=True,key=None, filter=True):
         """
         Writes the best scoring ligands to an SDF file and their corresponding scores to a CSV file.
 
@@ -143,7 +166,8 @@ class Similarity:
 
         # Sort by the score and remove duplicates based on the molecule title
         bestscore.sort_values(ScoreColumnName, inplace=True, ascending=ascending)
-        bestscore.drop_duplicates(subset=MolColumn, inplace=True)
+        dedup_cols = [MolColumn, secondary_column] if secondary_column else [MolColumn]
+        bestscore.drop_duplicates(subset=dedup_cols, inplace=True)
         bestscore.sort_values(by=[MolColumn, ScoreColumnName], ascending=True, ignore_index=True,inplace=True)
 
         # Update dataframe with only molecules within selected RMSD cutoff

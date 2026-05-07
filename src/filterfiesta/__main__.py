@@ -14,30 +14,31 @@ from filterfiesta.pose_similarity import Similarity
 
 class RunLogger:
     def __init__(self, output_suffix):
-        self.lines = []
-        self.output_suffix = output_suffix
+        self.path = _get_unique_path(Path(f"filterfiesta_{output_suffix}.log"))
         self.run_start = time.time()
+        self._file = open(self.path, "w", buffering=1)  # buffering=1 = line buffering
+        self._file.write(f"Log started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        print(f"Logging to {self.path}")
 
     def _header(self, title):
         bar = "=" * 60
-        self.lines.append(f"\n{bar}\n  {title}\n{bar}")
+        self._write(f"\n{bar}\n  {title}\n{bar}")
 
     def _subheader(self, title):
-        self.lines.append(f"\n--- {title} ---")
+        self._write(f"\n--- {title} ---")
 
     def add(self, text):
-        self.lines.append(text)
+        self._write(text)
 
-    def save(self, path=None):
-        if path is None:
-            path = _get_unique_path(Path(f"filterfiesta_{self.output_suffix}.log"))
+    def _write(self, text):
+        self._file.write(text + "\n")
+
+    def close(self):
         total = int(time.time() - self.run_start)
-        self.lines.append(f"\n{'='*60}")
-        self.lines.append(f"  Total run time: {total} seconds")
-        self.lines.append(f"{'='*60}")
-        with open(path, "w") as f:
-            f.write("\n".join(self.lines))
-        print(f"Log saved to {path}")
+        self._write(f"\n{'='*60}")
+        self._write(f"  Total run time: {total} seconds")
+        self._write(f"{'='*60}")
+        self._file.close()
 
 
 def create_parser():
@@ -75,6 +76,12 @@ def create_parser():
         "--sdf_title_property",
         default="_Name",
         help="SDF property containing the title of the conformer. Defaults to '_Name'."
+    )
+    parser.add_argument(
+        "--sdf_secondary_property",
+        default=None,
+        help="Optional secondary SDF property used as additional grouping key for RMSD calculation. "
+            "Only molecules matching on both title and this property are grouped together."
     )
     parser.add_argument(
         "--sdf_score_property",
@@ -145,7 +152,7 @@ def create_parser():
     return args
 
 
-def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_column, score_column,sdf_molecule_name,sdf_score_property, log):
+def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_column, score_column, sdf_molecule_name, sdf_score_property, log, secondary_property=None):
     log._header("STEP 1 — MOLECULE MATCHING")
 
     new_score_dfs = []
@@ -162,6 +169,7 @@ def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_col
         df = pd.DataFrame()
         titles = []
         scores = []
+        secondary_values = []
         mol_index = 0
         mol_count = 0
         start_time = time.time()
@@ -179,6 +187,9 @@ def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_col
                 elif line.strip() == "> <"+sdf_molecule_name+">":
                     titles.append(next(file).strip())
                     found_title = True
+
+                if secondary_property and line.strip() == f"> <{secondary_property}>":
+                    secondary_values.append(next(file).strip())
 
                 if line.strip() == "> <"+sdf_score_property+">":
                     scores.append(float(next(file).strip()))
@@ -207,6 +218,8 @@ def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_col
 
         df[title_column] = titles
         df[score_column] = scores
+        if secondary_property:
+            df[secondary_property] = secondary_values
 
         # Sort dataframe of sdf properties, the index is not updated as it reflects the real order of molecules in the sdf
         df = df.sort_values(by=[title_column, score_column], ascending=True)
@@ -220,6 +233,8 @@ def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_col
 
         # Add column to score dataframe with the index of sdf properties, which represent the correct order with which to sample the supplier to match the score df
         score_df["Supplier order"] = df.index
+        if secondary_property:
+            score_df[secondary_property] = df[secondary_property].values
 
         log.add(f"  {docked_molecule}: {len(score_df)} molecules matched")
 
@@ -235,7 +250,7 @@ def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_col
     return new_score_dfs, supplier_lengths
 
 
-def average_conformer_rmsd(input_score_dfs, suppliers,docked_molecules, title_column, score_column, rmsd_cutoff,filter, log):
+def average_conformer_rmsd(input_score_dfs, suppliers,docked_molecules, title_column, score_column, rmsd_cutoff, filter, log, secondary_property=None):
     log._header("STEP 2 — POSE COHERENCE (RMSD) FILTER")
     log.add(f"RMSD cutoff: {rmsd_cutoff} | Filter active: {filter}")
 
@@ -246,9 +261,9 @@ def average_conformer_rmsd(input_score_dfs, suppliers,docked_molecules, title_co
 
         # Calculate average conformer RMSD
         f=Similarity(supplier,score_df)
-        f.groupByName(name_column=title_column)
+        f.groupByName(name_column=title_column, secondary_column=secondary_property)
 
-        grouped_scores = f.writeBestScore(score_column,title_column, cutoff=rmsd_cutoff, filter=filter)
+        grouped_scores = f.writeBestScore(score_column, title_column, secondary_column=secondary_property, cutoff=rmsd_cutoff, filter=filter)
 
         # update log
         n_in = len(score_df)
@@ -494,8 +509,7 @@ def save(input_dfs, docked_scores, docked_molecules, suppliers, output_suffix, g
             _write_output(df, supplier, csv_path, sdf_path, log)
 
     print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
-    log.add(f"Completed in {int(time.time()-t)} seconds")
-    log.save()   # ← writes the log file
+    log.add(f"Completed in {int(time.time() - start_time)} seconds")
 
 '''
 def save(input_dfs,docked_scores, docked_molecules, suppliers, output_suffix, grouped):
@@ -553,6 +567,8 @@ def main():
     log.add(f"Title column:        {args.title_column}")
     log.add(f"Score column:        {args.score_column}")
     log.add(f"SDF title property:  {args.sdf_title_property}")
+    if args.sdf_secondary_property:
+        log.add(f"SDF secondary property:  {args.sdf_secondary_property}")
     log.add(f"SDF score property:  {args.sdf_score_property}")
     log.add(f"Score cutoff:        {args.score_cutoff}")
     log.add(f"RMSD cutoff:         {args.rmsd_cutoff}")
@@ -564,88 +580,99 @@ def main():
     log.add(f"Save all:            {args.save_all}")
     log.add(f"Reference residues:  {args.residues_reference}")
 
-    if not args.sdf_score_property:
-        args.sdf_score_property=args.score_column
+    try:
+        if not args.sdf_score_property:
+            args.sdf_score_property=args.score_column
 
 
-    suppliers=[Chem.rdmolfiles.SDMolSupplier(lig) for lig in args.docked_molecules]
-    dfs=[pd.read_csv(score,sep=args.separator) for score in args.docked_scores]
+        suppliers=[Chem.rdmolfiles.SDMolSupplier(lig) for lig in args.docked_molecules]
+        dfs=[pd.read_csv(score,sep=args.separator) for score in args.docked_scores]
 
-    log._header("INPUT FILES")
-    for sdf, csv, rec in zip(args.docked_molecules, args.docked_scores, args.receptors):
-        mol_count = len(pd.read_csv(csv, sep=args.separator))
-        log.add(f"  {sdf}: {mol_count} molecules in score table | receptor: {rec}")
+        log._header("INPUT FILES")
+        for sdf, csv, rec in zip(args.docked_molecules, args.docked_scores, args.receptors):
+            mol_count = len(pd.read_csv(csv, sep=args.separator))
+            log.add(f"  {sdf}: {mol_count} molecules in score table | receptor: {rec}")
 
-    right_order_dfs, supplier_lengths=match_molecule_order(dfs,
-                                         docked_molecules=args.docked_molecules,
-                                         receptors=args.receptors,
-                                         title_column=args.title_column,
-                                         score_column=args.score_column,
-                                         sdf_molecule_name=args.sdf_title_property,
-                                         sdf_score_property=args.sdf_score_property,
-                                         log=log
-                                        )
+        right_order_dfs, supplier_lengths=match_molecule_order(dfs,
+                                            docked_molecules=args.docked_molecules,
+                                            receptors=args.receptors,
+                                            title_column=args.title_column,
+                                            score_column=args.score_column,
+                                            sdf_molecule_name=args.sdf_title_property,
+                                            sdf_score_property=args.sdf_score_property,
+                                            log=log,
+                                            secondary_property=args.sdf_secondary_property
+                                            )
 
-    rmsd_filtered_dfs=average_conformer_rmsd(right_order_dfs,
-                                             suppliers=suppliers,
-                                             docked_molecules=args.docked_molecules,
-                                             title_column=args.title_column,
-                                             score_column=args.score_column,
-                                             rmsd_cutoff=args.rmsd_cutoff,
-                                             filter=not args.save_all,
-                                             log=log
-                                             )
+        rmsd_filtered_dfs=average_conformer_rmsd(right_order_dfs,
+                                                suppliers=suppliers,
+                                                docked_molecules=args.docked_molecules,
+                                                title_column=args.title_column,
+                                                score_column=args.score_column,
+                                                rmsd_cutoff=args.rmsd_cutoff,
+                                                filter=not args.save_all,
+                                                log=log,
+                                                secondary_property=args.sdf_secondary_property
+                                                )
 
-    filtered_docking_dfs=docking_score_filter(rmsd_filtered_dfs,
-                                              suppliers=suppliers,
-                                              docked_molecules=args.docked_molecules,
-                                              score_column=args.score_column,
-                                              score_cutoff=args.score_cutoff,
-                                              filter=not args.save_all,
-                                              log=log
-                                              )
+        filtered_docking_dfs=docking_score_filter(rmsd_filtered_dfs,
+                                                suppliers=suppliers,
+                                                docked_molecules=args.docked_molecules,
+                                                score_column=args.score_column,
+                                                score_cutoff=args.score_cutoff,
+                                                filter=not args.save_all,
+                                                log=log
+                                                )
 
-    plif_filtered_dfs=plif_filter(filtered_docking_dfs,
-                                reference_file=args.residues_reference,
-                                plif_cutoff=args.plif_cutoff,
-                                receptors=args.receptors,
-                                suppliers=suppliers,
-                                docked_molecules=args.docked_molecules,
-                                filter=not args.save_all,
-                                log=log
-                                )
-
-    a=plif_filtered_dfs
-    print(a[0][:10])
-    titles = [mol.GetProp("_Name") if mol is not None and mol.HasProp("_Name") else "Untitled" for mol in suppliers[0]]
-    print([titles[x] for x in a[0]["Supplier order"][:10]])
-
-
-    if args.save_all:
-        save(input_dfs=plif_filtered_dfs,
-         docked_scores=args.docked_scores,
-         docked_molecules=args.docked_molecules,
-         suppliers=suppliers,
-         output_suffix=args.output_suffix,
-         grouped=True)
-
-    else:
-        clusterd_dfs=cluster_filter(input_dfs=plif_filtered_dfs,
-                                    supplier_lengths=supplier_lengths,
+        plif_filtered_dfs=plif_filter(filtered_docking_dfs,
+                                    reference_file=args.residues_reference,
+                                    plif_cutoff=args.plif_cutoff,
+                                    receptors=args.receptors,
                                     suppliers=suppliers,
-                                    clustering_cutoff=args.clustering_cutoff,
-                                    clusters_to_save=args.output_size,
-                                    grouped=not args.split,
+                                    docked_molecules=args.docked_molecules,
+                                    filter=not args.save_all,
                                     log=log
                                     )
 
-        save(input_dfs=clusterd_dfs,
+        a=plif_filtered_dfs
+        print(a[0][:10])
+        titles = [mol.GetProp("_Name") if mol is not None and mol.HasProp("_Name") else "Untitled" for mol in suppliers[0]]
+        print([titles[x] for x in a[0]["Supplier order"][:10]])
+
+
+        if args.save_all:
+            save(input_dfs=plif_filtered_dfs,
             docked_scores=args.docked_scores,
             docked_molecules=args.docked_molecules,
             suppliers=suppliers,
             output_suffix=args.output_suffix,
-            grouped=not args.split,
+            grouped=True,
             log=log
             )
+
+        else:
+            clusterd_dfs=cluster_filter(input_dfs=plif_filtered_dfs,
+                                        supplier_lengths=supplier_lengths,
+                                        suppliers=suppliers,
+                                        clustering_cutoff=args.clustering_cutoff,
+                                        clusters_to_save=args.output_size,
+                                        grouped=not args.split,
+                                        log=log
+                                        )
+
+            save(input_dfs=clusterd_dfs,
+                docked_scores=args.docked_scores,
+                docked_molecules=args.docked_molecules,
+                suppliers=suppliers,
+                output_suffix=args.output_suffix,
+                grouped=not args.split,
+                log=log
+                )
+    except Exception as e:
+        log.add(f"\nERROR: {type(e).__name__}: {e}")
+        log.close()
+        raise
+
+
 if __name__ == "__main__":
     main()
