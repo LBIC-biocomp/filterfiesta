@@ -665,12 +665,6 @@ def main():
                                     log=log
                                     )
 
-        a=plif_filtered_dfs
-        print(a[0][:10])
-        titles = [mol.GetProp("_Name") if mol is not None and mol.HasProp("_Name") else "Untitled" for mol in suppliers[0]]
-        print([titles[x] for x in a[0]["Supplier order"][:10]])
-
-
         if args.save_all:
             save(input_dfs=plif_filtered_dfs,
             docked_scores=args.docked_scores,
