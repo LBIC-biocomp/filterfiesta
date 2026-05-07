@@ -114,7 +114,7 @@ class Similarity:
             if len(set(atom_counts)) > 1:
                 if secondary_column:
                     raise ValueError(
-                        f"Molecule group with title: '{group_key[0]}' and secondary property '{group_key[1]} has conformers with different atom counts: {atom_counts}. "
+                        f"Molecule group with title: '{group_key[0]}' and secondary property '{group_key[1]}' has conformers with different atom counts: {atom_counts}. "
                         f"Check for duplicate names assigned to different structures in your SDF."
                 )
                 else:
@@ -168,7 +168,8 @@ class Similarity:
         bestscore.sort_values(ScoreColumnName, inplace=True, ascending=ascending)
         dedup_cols = [MolColumn, secondary_column] if secondary_column else [MolColumn]
         bestscore.drop_duplicates(subset=dedup_cols, inplace=True)
-        bestscore.sort_values(by=[MolColumn, ScoreColumnName], ascending=True, ignore_index=True,inplace=True)
+        sort_cols = [MolColumn, secondary_column, ScoreColumnName] if secondary_column else [MolColumn, ScoreColumnName]
+        bestscore.sort_values(by=sort_cols, ascending=True, ignore_index=True, inplace=True)
 
         # Update dataframe with only molecules within selected RMSD cutoff
         bestscore = bestscore[(bestscore["Group RMSD"]<cutoff)]

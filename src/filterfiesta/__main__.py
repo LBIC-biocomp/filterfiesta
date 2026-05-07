@@ -4,6 +4,7 @@ import argparse
 import pandas as pd
 from rdkit import Chem
 import time
+import re
 from itertools import chain
 from pathlib import Path
 
@@ -84,6 +85,12 @@ def create_parser():
             "Only molecules matching on both title and this property are grouped together."
     )
     parser.add_argument(
+        "--name_key",
+        action="store_true",
+        default=False,
+        help="If specified, molecule names are parsed as 'base_number1_number2' and grouped by 'base_number1', treating number1 as stereoisomer ID and number2 as a conformer ID (default naming by OpenEye applications)."
+    )
+    parser.add_argument(
         "--sdf_score_property",
         default=None,
         help="SDF property containing the score of the conformer. Defaults to the score_column if not set."
@@ -152,7 +159,12 @@ def create_parser():
     return args
 
 
-def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_column, score_column, sdf_molecule_name, sdf_score_property, log, secondary_property=None):
+def _extract_name_key(title: str) -> str:
+    m = re.match(r'^(.*?)_(\d+)_(\d+)$', title)
+    return f"{m.group(1)}_{m.group(2)}" if m else title
+
+
+def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_column, score_column, sdf_molecule_name, sdf_score_property, log, secondary_property=None, name_key=False):
     log._header("STEP 1 — MOLECULE MATCHING")
 
     new_score_dfs = []
@@ -220,6 +232,9 @@ def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_col
         df[score_column] = scores
         if secondary_property:
             df[secondary_property] = secondary_values
+        if name_key:
+            df["Title Key"] = df[title_column].apply(_extract_name_key)
+            score_df["Title Key"] = score_df[title_column].apply(_extract_name_key)
 
         # Sort dataframe of sdf properties, the index is not updated as it reflects the real order of molecules in the sdf
         df = df.sort_values(by=[title_column, score_column], ascending=True)
@@ -250,20 +265,22 @@ def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_col
     return new_score_dfs, supplier_lengths
 
 
-def average_conformer_rmsd(input_score_dfs, suppliers,docked_molecules, title_column, score_column, rmsd_cutoff, filter, log, secondary_property=None):
+def average_conformer_rmsd(input_score_dfs, suppliers,docked_molecules, title_column, score_column, rmsd_cutoff, filter, log, secondary_property=None, name_key=False):
     log._header("STEP 2 — POSE COHERENCE (RMSD) FILTER")
     log.add(f"RMSD cutoff: {rmsd_cutoff} | Filter active: {filter}")
-
     start_time = time.time()
-    new_score_dfs=[]
     print(f"\nCalculating average conformer RMSD...")
+
+    new_score_dfs=[]
+    grouping_column = "Title Key" if name_key else title_column
+
     for supplier, score_df, lig in zip(suppliers,input_score_dfs,docked_molecules):
 
         # Calculate average conformer RMSD
         f=Similarity(supplier,score_df)
-        f.groupByName(name_column=title_column, secondary_column=secondary_property)
+        f.groupByName(name_column=grouping_column, secondary_column=secondary_property)
 
-        grouped_scores = f.writeBestScore(score_column, title_column, secondary_column=secondary_property, cutoff=rmsd_cutoff, filter=filter)
+        grouped_scores = f.writeBestScore(score_column, grouping_column, secondary_column=secondary_property, cutoff=rmsd_cutoff, filter=filter)
 
         # update log
         n_in = len(score_df)
@@ -290,12 +307,12 @@ def docking_score_filter(input_dfs, suppliers, docked_molecules, score_column, s
     print("\nIt's time for limbo!")
     print(f"Retaining molecules with score below {score_cutoff}:")
 
-    for lig,score_df,supplier in zip(docked_molecules,input_dfs,suppliers):
+    for i, (lig, score_df, supplier) in enumerate(zip(docked_molecules, input_dfs, suppliers)):
         #filter based on selected score threshold
         if filter:
-            score_df = score_df[(score_df[score_column]<score_cutoff)]
+            score_df = score_df[(score_df[score_column] < score_cutoff)]
             # update log
-        n_in = len(input_dfs[docked_molecules.index(lig)])  # molecules coming in
+        n_in = len(input_dfs[i])  # molecules coming in
         log.add(f"  {lig}: {n_in} in → {len(score_df)} passed "
                 f"({'filter off' if not filter else f'{n_in - len(score_df)} removed'})")
 
@@ -306,6 +323,17 @@ def docking_score_filter(input_dfs, suppliers, docked_molecules, score_column, s
     print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
     log.add(f"Completed in {int(time.time() - start_time)} seconds")
     return new_score_dfs
+
+
+def _residue_sort_key(r):
+    # Expected format: "X:RES123-IA" where X is a single-char chain
+    parts = r.split(':')
+    if len(parts) != 2 or len(parts[0]) != 1:
+        raise ValueError(
+            f"Unexpected residue format '{r}'. "
+            f"Expected 'ChainID:ResidueName+Number-InteractionType' with a single-character chain ID."
+        )
+    return int(''.join(filter(str.isdigit, parts[1])))
 
 
 def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, docked_molecules,filter, log):
@@ -327,7 +355,7 @@ def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, dock
 
     # keep only unique residues and sort them by residue number
     unique_residues = list(set(all_residues))
-    unique_residues.sort(key=lambda x: int(x[5:].split('-')[0]))
+    unique_residues.sort(key=_residue_sort_key)
     log.add(f"Unique residues across all receptors: {len(unique_residues)}")
 
     # Create an empty dataframe with the unique residues as columns, will be the template for the following ones
@@ -567,6 +595,7 @@ def main():
     log.add(f"Title column:        {args.title_column}")
     log.add(f"Score column:        {args.score_column}")
     log.add(f"SDF title property:  {args.sdf_title_property}")
+    log.add(f"Name key: {args.name_key}")
     if args.sdf_secondary_property:
         log.add(f"SDF secondary property:  {args.sdf_secondary_property}")
     log.add(f"SDF score property:  {args.sdf_score_property}")
@@ -601,7 +630,8 @@ def main():
                                             sdf_molecule_name=args.sdf_title_property,
                                             sdf_score_property=args.sdf_score_property,
                                             log=log,
-                                            secondary_property=args.sdf_secondary_property
+                                            secondary_property=args.sdf_secondary_property,
+                                            name_key=args.name_key
                                             )
 
         rmsd_filtered_dfs=average_conformer_rmsd(right_order_dfs,
@@ -612,7 +642,8 @@ def main():
                                                 rmsd_cutoff=args.rmsd_cutoff,
                                                 filter=not args.save_all,
                                                 log=log,
-                                                secondary_property=args.sdf_secondary_property
+                                                secondary_property=args.sdf_secondary_property,
+                                                name_key=args.name_key
                                                 )
 
         filtered_docking_dfs=docking_score_filter(rmsd_filtered_dfs,
