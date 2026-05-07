@@ -12,6 +12,7 @@ class Similarity:
         # Initialize "Group RMSD" column in dataframe
         self.scores["Group RMSD"]=pd.NA
 
+    '''
     def groupByN(self, N=10):
         """
         Groups ligands from `self.ligands` into batches of size N, computes the RMS distance for each ligand
@@ -62,6 +63,7 @@ class Similarity:
             RMSD_group=[]
             MolGroup=[]
         self.scores["Group RMSD"]=RMSDs
+        '''
 
     def groupByName(self, name_column):
         """
@@ -87,7 +89,7 @@ class Similarity:
         names_df=self.scores[name_column].value_counts()
         names=names_df.index
         self.scores["Group RMSD"]=pd.NA
-#        print(f"Calculating pose similarities for {len(names_df)} unique molecules...")
+
         for i in tqdm(range(len(names_df))):
             filtered_scores=self.scores[self.scores[name_column]==names[i]]
             ids=filtered_scores["Supplier order"]
@@ -99,8 +101,6 @@ class Similarity:
             conformers=[mol.GetConformer() for mol in MolGroup]
             positions= np.stack([conf.GetPositions() for conf in conformers])
             average_pos=np.mean(positions,axis=0)
-
-
 
             reference_molecule= Chem.Mol(MolGroup[0])
             reference_conf=reference_molecule.GetConformer()
@@ -114,7 +114,6 @@ class Similarity:
 
             for index in filtered_scores["Group RMSD"].index:
                 self.scores.loc[index, "Group RMSD"]=np.mean(Mol_RMSD)
-
 
 
     def writeBestScore(self, ScoreColumnName="score", MolColumn="Title", cutoff=1, ascending=True,key=None, filter=True):
@@ -149,19 +148,5 @@ class Similarity:
 
         # Update dataframe with only molecules within selected RMSD cutoff
         bestscore = bestscore[(bestscore["Group RMSD"]<cutoff)]
-        # !!! removed score save
-        # Save the best scores to a CSV file
-        #print(f"Writing file: {score_path}")
-        #bestscore.to_csv(score_path, index=False)
-
-        # Write the corresponding ligands to the SDF file
-        # !!! removed sdf save
-        #writer = Chem.SDWriter(sdf_path)
-        #print(f"Writing file: {sdf_path}")
-        #for i in bestscore.index:
-            #m = Chem.rdmolops.AddHs(self.ligands[i],addCoords=True) # !!! added hydrogens before saving molecules
-            #writer.write(m)
-
-        #writer.close()
 
         return bestscore

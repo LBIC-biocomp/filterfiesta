@@ -13,7 +13,7 @@ class Cluster:
         self.morgan_fingerprints = [morgan_gen.GetFingerprint(ligands[i]) for i in tqdm(scores["Supplier order"]) if ligands[i] is not None]
 
 
-
+    '''
     def calculate_cluster(self,cutoff=0.2):
         # generate the distance matrix:
         distance_matrix = []
@@ -29,7 +29,7 @@ class Cluster:
             distance_matrix.extend([1-x for x in similarities]) # avoids having a list of lists of progressively longer length, Butina.ClusterData accepts only a monodimensional list
         self.clusters = Butina.ClusterData(distance_matrix,number_of_fps,cutoff,isDistData=True)
         return self.clusters
-
+    '''
 
 
     def cluster(self,cutoff=0.2):
