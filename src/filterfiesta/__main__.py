@@ -14,8 +14,8 @@ from filterfiesta.pose_similarity import Similarity
 
 
 class RunLogger:
-    def __init__(self, output_suffix):
-        self.path = _get_unique_path(Path(f"filterfiesta_{output_suffix}.log"))
+    def __init__(self, output_suffix, run_counter=""):
+        self.path = Path(f"filterfiesta_{output_suffix}{run_counter}.log")
         self.run_start = time.time()
         self._file = open(self.path, "w", buffering=1)  # buffering=1 = line buffering
         self._file.write(f"Log started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -481,18 +481,21 @@ def cluster_filter(input_dfs, supplier_lengths, suppliers, clustering_cutoff, cl
     return new_score_dfs
 
 
-def _get_unique_path(path: Path) -> Path:
-    if not path.exists():
-        return path
-    stem = path.stem
-    suffix = path.suffix
-    parent = path.parent
+def _get_run_counter(output_suffix: str) -> str:
+    extensions = [".log", ".csv", ".sdf"]
+    def any_exists(counter):
+        return any(
+            f for ext in extensions
+            for f in Path().glob(f"*{output_suffix}{counter}{ext}")
+        )
+    if not any_exists(""):
+        return ""
     counter = 1
-    while True:
-        new_path = parent / f"{stem}_{counter}{suffix}"
-        if not new_path.exists():
-            return new_path
+
+    while any_exists(f"_{counter}"):
         counter += 1
+
+    return f"_{counter}"
 
 
 def _write_output(df, supplier, csv_path, sdf_path, log):
@@ -515,7 +518,7 @@ def _write_output(df, supplier, csv_path, sdf_path, log):
     log.add(f"  SDF:  {sdf_path} ({len(selected_mols)} molecules written)")
 
 
-def save(input_dfs, docked_scores, docked_molecules, suppliers, output_suffix, grouped, log):
+def save(input_dfs, docked_scores, docked_molecules, suppliers, output_suffix, grouped, log, run_counter=""):
     log._header("OUTPUT")
     start_time = time.time()
     print("Writing output files...")
@@ -524,56 +527,21 @@ def save(input_dfs, docked_scores, docked_molecules, suppliers, output_suffix, g
         new_supplier = []
         for sup in suppliers:
             new_supplier += list(sup)
-        csv_path = _get_unique_path(Path(f"grouped_{output_suffix}.csv"))
-        sdf_path = _get_unique_path(Path(f"grouped_{output_suffix}.sdf"))
+        csv_path = Path(f"grouped_{output_suffix}{run_counter}.csv")
+        sdf_path = Path(f"grouped_{output_suffix}{run_counter}.sdf")
         _write_output(input_dfs[0], new_supplier, csv_path, sdf_path, log)
 
     else:
         for df, input_csv, input_sdf, supplier in zip(input_dfs, docked_scores, docked_molecules, suppliers):
             input_csv_path = Path(input_csv)
             input_sdf_path = Path(input_sdf)
-            csv_path = _get_unique_path(Path(f"{input_csv_path.stem}_{output_suffix}{input_csv_path.suffix}"))
-            sdf_path = _get_unique_path(Path(f"{input_sdf_path.stem}_{output_suffix}{input_sdf_path.suffix}"))
+            csv_path = Path(f"{input_csv_path.stem}_{output_suffix}{run_counter}{input_csv_path.suffix}")
+            sdf_path = Path(f"{input_sdf_path.stem}_{output_suffix}{run_counter}{input_sdf_path.suffix}")
             _write_output(df, supplier, csv_path, sdf_path, log)
 
     print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
     log.add(f"Completed in {int(time.time() - start_time)} seconds")
 
-'''
-def save(input_dfs,docked_scores, docked_molecules, suppliers, output_suffix, grouped):
-    start_time = time.time()
-    print("Writing output files...")
-
-    if grouped:
-        new_supplier=[]
-        for sup in suppliers:
-            new_supplier += list(sup)
-        suppliers=[new_supplier]
-
-    for (df, input_csv,input_sdf, supplier) in zip(input_dfs,docked_scores,docked_molecules,suppliers):
-        input_csv_path=Path(input_csv)
-        output_csv_path = _get_unique_path(Path(f"{input_csv_path.stem}_{output_suffix}{input_csv_path.suffix}"))
-        input_sdf_path=Path(input_sdf)
-        output_sdf_path = _get_unique_path(Path(f"{input_sdf_path.stem}_{output_suffix}{input_sdf_path.suffix}"))
-
-        if grouped:
-            output_csv_path = _get_unique_path(Path(f"grouped_{output_suffix}{input_csv_path.suffix}"))
-            output_sdf_path = _get_unique_path(Path(f"grouped_{output_suffix}{input_sdf_path.suffix}"))
-
-        if 'Concatenated Supplier order' in df.columns:
-            selected_mols = [supplier[i] for i in df['Concatenated Supplier order'] if supplier[i] is not None]
-            df.drop('Concatenated Supplier order',axis=1,inplace=True)
-        else:
-            selected_mols = [supplier[i] for i in df['Supplier order'] if supplier[i] is not None]
-        df.drop('Supplier order',axis=1,inplace=True)
-
-        with Chem.SDWriter(output_sdf_path) as writer:
-            for mol in selected_mols:
-                mol= Chem.rdmolops.AddHs(mol,addCoords=True)
-                writer.write(mol)
-        df.to_csv(output_csv_path,index=False)
-    print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
-'''
 
 def main():
     print("""    ______ ____ __   ______ ______ ____   ______ ____ ______ _____ ______ ___
@@ -585,7 +553,13 @@ def main():
 """)
     args=create_parser()
 
-    log = RunLogger(args.output_suffix)
+    run_counter = _get_run_counter(args.output_suffix)
+    log = RunLogger(args.output_suffix, run_counter=run_counter)
+
+    if run_counter:
+        print(f"Files will be saved with suffix '{args.output_suffix}{run_counter}'")
+        log.add(f"Files will be saved with suffix '{args.output_suffix}{run_counter}'")
+
 
     log._header("RUN PARAMETERS")
     log.add(f"Run started:         {time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -672,7 +646,8 @@ def main():
             suppliers=suppliers,
             output_suffix=args.output_suffix,
             grouped=True,
-            log=log
+            log=log,
+            run_counter=run_counter
             )
 
         else:
@@ -691,7 +666,8 @@ def main():
                 suppliers=suppliers,
                 output_suffix=args.output_suffix,
                 grouped=not args.split,
-                log=log
+                log=log,
+                run_counter=run_counter
                 )
     except Exception as e:
         log.add(f"\nERROR: {type(e).__name__}: {e}")
