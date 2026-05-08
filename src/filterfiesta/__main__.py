@@ -15,7 +15,7 @@ from filterfiesta.pose_similarity import Similarity
 
 class RunLogger:
     def __init__(self, output_suffix, run_counter=""):
-        self.path = Path(f"filterfiesta_{output_suffix}{run_counter}.log")
+        self.path = Path(f"ffiesta_{output_suffix}{run_counter}.log")
         self.run_start = time.time()
         self._file = open(self.path, "w", buffering=1)  # buffering=1 = line buffering
         self._file.write(f"Log started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -482,11 +482,17 @@ def cluster_filter(input_dfs, supplier_lengths, suppliers, clustering_cutoff, cl
 
 
 def _get_run_counter(output_suffix: str) -> str:
-    extensions = [".log", ".csv", ".sdf"]
     def any_exists(counter):
+        patterns = [
+            f"ffiesta_{output_suffix}{counter}.log",
+            f"ffiesta_grouped_{output_suffix}{counter}.csv",
+            f"ffiesta_grouped_{output_suffix}{counter}.sdf",
+            f"*_{output_suffix}{counter}.csv",
+            f"*_{output_suffix}{counter}.sdf",
+        ]
         return any(
-            f for ext in extensions
-            for f in Path().glob(f"*{output_suffix}{counter}{ext}")
+            f for pattern in patterns
+            for f in Path().glob(pattern)
         )
     if not any_exists(""):
         return ""
@@ -527,16 +533,16 @@ def save(input_dfs, docked_scores, docked_molecules, suppliers, output_suffix, g
         new_supplier = []
         for sup in suppliers:
             new_supplier += list(sup)
-        csv_path = Path(f"grouped_{output_suffix}{run_counter}.csv")
-        sdf_path = Path(f"grouped_{output_suffix}{run_counter}.sdf")
+        csv_path = Path(f"ffiesta_grouped_{output_suffix}{run_counter}.csv")
+        sdf_path = Path(f"ffiesta_grouped_{output_suffix}{run_counter}.sdf")
         _write_output(input_dfs[0], new_supplier, csv_path, sdf_path, log)
 
     else:
         for df, input_csv, input_sdf, supplier in zip(input_dfs, docked_scores, docked_molecules, suppliers):
             input_csv_path = Path(input_csv)
             input_sdf_path = Path(input_sdf)
-            csv_path = Path(f"{input_csv_path.stem}_{output_suffix}{run_counter}{input_csv_path.suffix}")
-            sdf_path = Path(f"{input_sdf_path.stem}_{output_suffix}{run_counter}{input_sdf_path.suffix}")
+            csv_path = Path(f"ffiesta_{input_csv_path.stem}_{output_suffix}{run_counter}{input_csv_path.suffix}")
+            sdf_path = Path(f"ffiesta_{input_sdf_path.stem}_{output_suffix}{run_counter}{input_sdf_path.suffix}")
             _write_output(df, supplier, csv_path, sdf_path, log)
 
     print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
