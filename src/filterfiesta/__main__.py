@@ -4,13 +4,43 @@ import argparse
 import pandas as pd
 from rdkit import Chem
 import time
+import re
 from itertools import chain
 from pathlib import Path
 
 from filterfiesta.fingerprints import Fingerprint
 from filterfiesta.cluster import Cluster
 from filterfiesta.pose_similarity import Similarity
-from filterfiesta.cluster import Cluster
+
+
+class RunLogger:
+    def __init__(self, output_suffix, run_counter=""):
+        self.path = Path(f"filterfiesta_{output_suffix}{run_counter}.log")
+        self.run_start = time.time()
+        self._file = open(self.path, "w", buffering=1)  # buffering=1 = line buffering
+        self._file.write(f"Log started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        print(f"Logging to {self.path}")
+
+    def _header(self, title):
+        bar = "=" * 60
+        self._write(f"\n{bar}\n  {title}\n{bar}")
+
+    def _subheader(self, title):
+        self._write(f"\n--- {title} ---")
+
+    def add(self, text):
+        self._write(text)
+
+    def _write(self, text):
+        self._file.write(text + "\n")
+
+    def close(self):
+        total = int(time.time() - self.run_start)
+        self._write(f"\n{'='*60}")
+        self._write(f"  Total run time: {total} seconds")
+        self._write(f"{'='*60}")
+        self._file.close()
+
 
 def create_parser():
     parser = argparse.ArgumentParser(description="Filter docked molecules based on various parameters.")
@@ -47,6 +77,18 @@ def create_parser():
         "--sdf_title_property",
         default="_Name",
         help="SDF property containing the title of the conformer. Defaults to '_Name'."
+    )
+    parser.add_argument(
+        "--sdf_secondary_property",
+        default=None,
+        help="Optional secondary SDF property used as additional grouping key for RMSD calculation. "
+            "Only molecules matching on both title and this property are grouped together."
+    )
+    parser.add_argument(
+        "--name_key",
+        action="store_true",
+        default=False,
+        help="If specified, molecule names are parsed as 'base_number1_number2' and grouped by 'base_number1', treating number1 as stereoisomer ID and number2 as a conformer ID (default naming by OpenEye applications)."
     )
     parser.add_argument(
         "--sdf_score_property",
@@ -109,57 +151,93 @@ def create_parser():
     parser.add_argument(
         "-sv","--save_all",
         action="store_true",
-        help="If specified, the input mulecules are NOT filtered in the steps before clustering, ressulting in an addition output table containing all the measured properties for all the molecules."
+        help="If specified, the input molecules are NOT filtered in the steps before clustering, resulting in an additional output table containing all the measured properties for all the molecules."
     )
 
 
     args = parser.parse_args()
     return args
 
-def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_column, score_column,sdf_molecule_name,sdf_score_property):
+
+def _extract_name_key(title: str) -> str:
+    m = re.match(r'^(.*?)_(\d+)_(\d+)$', title)
+    return f"{m.group(1)}_{m.group(2)}" if m else title
+
+
+def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_column, score_column, sdf_molecule_name, sdf_score_property, log, secondary_property=None, name_key=False):
+    log._header("STEP 1 — MOLECULE MATCHING")
+
     new_score_dfs = []
+    supplier_lengths = []
     start_time = time.time()
     print("Party planners are checking the molecule list…")
 
     # Match the order of score dataframes and suppliers, add receptor column
     for score_df, docked_molecule, rec in zip(input_score_dfs,docked_molecules, receptors):
-
-       # # Check if lenghts match
-       # if len(supplier) != len(score_df):
-        #    raise ValueError("Lenghts of score table and sdf file are not matching.")
-
         # Sort score dataframe by title and then by score, the latter ensures the best scoring conformer of each group is always the first
-        # Ignores index
         score_df = score_df.sort_values(by=[title_column, score_column], ascending=True, ignore_index=True)
+
         # Create a dataframe containing titles and scores properties from the sdf
         df = pd.DataFrame()
-
-        sdf_file=open(docked_molecule)
         titles = []
         scores = []
+        secondary_values = []
+        mol_index = 0
+        mol_count = 0
         start_time = time.time()
 
+        found_title = False
+        found_property = False
         new_molecule=True
+
         with open(docked_molecule, "r") as file:
             for line in file:
-                if new_molecule and sdf_molecule_name=="_Name":
+                if new_molecule and (sdf_molecule_name=="_Name"):
                     titles.append(line.strip())
+                    found_title = True
                     new_molecule=False
                 elif line.strip() == "> <"+sdf_molecule_name+">":
                     titles.append(next(file).strip())
+                    found_title = True
+
+                if secondary_property and line.strip() == f"> <{secondary_property}>":
+                    secondary_values.append(next(file).strip())
 
                 if line.strip() == "> <"+sdf_score_property+">":
                     scores.append(float(next(file).strip()))
+                    found_property = True
 
                 if line.strip() == "$$$$":
+                    if not found_title:
+                        raise ValueError(
+                            f"Molecule {mol_index} in {docked_molecule} is missing "
+                            f"the property tag '{sdf_molecule_name}'. "
+                            f"Check --sdf_title_property is set correctly."
+                        )
+                    if not found_property:
+                        raise ValueError(
+                            f"Molecule {mol_index} in {docked_molecule} is missing "
+                            f"the property tag '{sdf_score_property}'. "
+                            f"Check --sdf_score_property is set correctly."
+                        )
+
+                    mol_index += 1
+                    mol_count += 1
+                    found_title = False
+                    found_property = False
                     new_molecule=True
+        supplier_lengths.append(mol_count)
 
         df[title_column] = titles
         df[score_column] = scores
+        if secondary_property:
+            df[secondary_property] = secondary_values
+        if name_key:
+            df["Title Key"] = df[title_column].apply(_extract_name_key)
+            score_df["Title Key"] = score_df[title_column].apply(_extract_name_key)
 
         # Sort dataframe of sdf properties, the index is not updated as it reflects the real order of molecules in the sdf
         df = df.sort_values(by=[title_column, score_column], ascending=True)
-
 
         # Check if the two dataframe match
         if score_df[title_column].to_list() != df[title_column].to_list():
@@ -168,8 +246,12 @@ def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_col
         if score_df[score_column].to_list() != df[score_column].to_list():
             raise ValueError("Score columns not matching.")
 
-        # Add column to score dataframe with the index of sdf properties, which represent the correct order to sample the supplier to match the score df
+        # Add column to score dataframe with the index of sdf properties, which represent the correct order with which to sample the supplier to match the score df
         score_df["Supplier order"] = df.index
+        if secondary_property:
+            score_df[secondary_property] = df[secondary_property].values
+
+        log.add(f"  {docked_molecule}: {len(score_df)} molecules matched")
 
         # Add column with receptor name to score dataframe
         rec_name = rec.replace(".pdb","")
@@ -178,19 +260,34 @@ def match_molecule_order(input_score_dfs, docked_molecules, receptors, title_col
         new_score_dfs.append(score_df)
     print("Molecules perfectly lined up!")
     print("--- Done. %s seconds ---" % int(time.time() - start_time))
-    return new_score_dfs
 
-def average_conformer_rmsd(input_score_dfs, suppliers,docked_molecules, title_column, score_column, rmsd_cutoff,filter):
+    log.add(f"Completed in {int(time.time() - start_time)} seconds")
+    return new_score_dfs, supplier_lengths
+
+
+def average_conformer_rmsd(input_score_dfs, suppliers,docked_molecules, title_column, score_column, rmsd_cutoff, filter, log, secondary_property=None, name_key=False):
+    log._header("STEP 2 — POSE COHERENCE (RMSD) FILTER")
+    log.add(f"RMSD cutoff: {rmsd_cutoff} | Filter active: {filter}")
     start_time = time.time()
-    new_score_dfs=[]
     print(f"\nCalculating average conformer RMSD...")
-    for supplier, score_df, lig in zip(suppliers,input_score_dfs,docked_molecules): # zip() receives iterables as arguments and pairs in order every i-th element of each iterable as a tuple
+
+    new_score_dfs=[]
+    grouping_column = "Title Key" if name_key else title_column
+
+    for supplier, score_df, lig in zip(suppliers,input_score_dfs,docked_molecules):
 
         # Calculate average conformer RMSD
         f=Similarity(supplier,score_df)
-        f.groupByName(name_column=title_column)
+        f.groupByName(name_column=grouping_column, secondary_column=secondary_property)
 
-        grouped_scores = f.writeBestScore(score_column,title_column, cutoff=rmsd_cutoff, filter=filter)
+        grouped_scores = f.writeBestScore(score_column, grouping_column, secondary_column=secondary_property, cutoff=rmsd_cutoff, filter=filter)
+
+        # update log
+        n_in = len(score_df)
+        n_out = len(grouped_scores)
+        log.add(f"  {lig}: {n_in} poses in → {n_out} unique molecules retained "
+                f"({'filter off' if not filter else f'{n_in - n_out} removed'})")
+
         # Update score dataframe
         new_score_dfs.append(grouped_scores)
 
@@ -198,23 +295,51 @@ def average_conformer_rmsd(input_score_dfs, suppliers,docked_molecules, title_co
         print(f"{lig}... kept {len(score_df)} unique molecules.")
 
     print("--- Done. %s seconds ---" % int(time.time() - start_time))
+    log.add(f"Completed in {int(time.time()- start_time)} seconds")
     return new_score_dfs
 
-def docking_score_filter(input_dfs, suppliers,docked_molecules, score_column, score_cutoff,filter):
+
+def docking_score_filter(input_dfs, suppliers, docked_molecules, score_column, score_cutoff, filter, log):
+    log._header("STEP 3 — DOCKING SCORE FILTER")
+    log.add(f"Score cutoff: {score_cutoff} | Filter active: {filter}")
     start_time = time.time()
     new_score_dfs=[]
     print("\nIt's time for limbo!")
     print(f"Retaining molecules with score below {score_cutoff}:")
-    for lig,score_df,supplier in zip(docked_molecules,input_dfs,suppliers):
+
+    for i, (lig, score_df, supplier) in enumerate(zip(docked_molecules, input_dfs, suppliers)):
         #filter based on selected score threshold
         if filter:
-            score_df = score_df[(score_df[score_column]<score_cutoff)]
+            score_df = score_df[(score_df[score_column] < score_cutoff)]
+            # update log
+        n_in = len(input_dfs[i])  # molecules coming in
+        log.add(f"  {lig}: {n_in} in → {len(score_df)} passed "
+                f"({'filter off' if not filter else f'{n_in - len(score_df)} removed'})")
+
         print(f"{lig}... {len(score_df)} passed.")
+
         new_score_dfs.append(score_df)
+
     print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
+    log.add(f"Completed in {int(time.time() - start_time)} seconds")
     return new_score_dfs
 
-def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, docked_molecules,filter):
+
+def _residue_sort_key(r):
+    # Expected format: "X:RES123-IA" where X is a single-char chain
+    parts = r.split(':')
+    if len(parts) != 2 or len(parts[0]) != 1:
+        raise ValueError(
+            f"Unexpected residue format '{r}'. "
+            f"Expected 'ChainID:ResidueName+Number-InteractionType' with a single-character chain ID."
+        )
+    return int(''.join(filter(str.isdigit, parts[1])))
+
+
+def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, docked_molecules,filter, log):
+    log._header("STEP 4 — PLIF FILTER")
+    log.add(f"PLIF cutoff: {plif_cutoff} | Filter active: {filter}")
+    log.add(f"Reference file: {reference_file}")
     start_time = time.time()
     new_score_dfs = []
     pd.set_option('future.no_silent_downcasting', True)
@@ -227,12 +352,14 @@ def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, dock
         f=Fingerprint(rec,supplier,score_df)
         residues=f.get_residues()
         all_residues += residues
+
     # keep only unique residues and sort them by residue number
     unique_residues = list(set(all_residues))
-    unique_residues.sort(key=lambda x: int(x[5:].split('-')[0]))
+    unique_residues.sort(key=_residue_sort_key)
+    log.add(f"Unique residues across all receptors: {len(unique_residues)}")
 
-
-    empty_df = pd.DataFrame(columns=unique_residues) # !!! Add dictionary with datatype bool. Create an empty dataframe with the unique residues as columns, will be the template for the following ones
+    # Create an empty dataframe with the unique residues as columns, will be the template for the following ones
+    empty_df = pd.DataFrame(columns=unique_residues) # !!! Add dictionary with datatype bool.
     empty_df = empty_df.astype(int)
     ia_types = ["VDW","AR-FF","AR-EF","HBD","HBA","I+","I-","ME",]
 
@@ -271,6 +398,11 @@ def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, dock
             print(f"Calculating Jaccard index between {lig} and reference fingerprints  ...")
             similarity=f.calculate_jaccard(reference_vector, sorted_table)
 
+            # update log
+            log.add(f"  {lig} | ref {ref}: Jaccard scores — "
+                    f"min={min(similarity):.3f}, max={max(similarity):.3f}, "
+                    f"mean={sum(similarity)/len(similarity):.3f}")
+
             # Add fingerprint similarity column to score dataframe
             col_name = ref.split("/")[-1].replace(".txt"," similarity")
             score_df[col_name] = similarity
@@ -279,24 +411,35 @@ def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, dock
             print(f"filtering based on {col_name}")
             if filter:
                 score_df = score_df[(score_df[col_name]>plif_cutoff)]
+                log.add(f"  {lig}: {len(score_df)} molecules passed PLIF filter")
+
             print(f"{lig}... {len(score_df)} passed.")
         new_score_dfs.append(score_df)
 
     print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
+    log.add(f"Completed in {int(time.time() - start_time)} seconds")
     return new_score_dfs
 
-def cluster_filter(input_dfs,suppliers,clustering_cutoff,clusters_to_save, grouped):
+
+def cluster_filter(input_dfs, supplier_lengths, suppliers, clustering_cutoff, clusters_to_save, grouped, log):
+    log._header("STEP 5 — CLUSTERING")
+    log.add(f"Clustering cutoff: {clustering_cutoff} | Grouped: {grouped} | Max clusters to save: {clusters_to_save}")
     start_time = time.time()
     print("Clustering molecules....")
     new_score_dfs = []
+
     if grouped:
         concatenated_dfs=input_dfs[0].copy()
+        concatenated_dfs["Original Supplier order"] = concatenated_dfs["Supplier order"].map(int)
+
         for i in range(1,len(input_dfs)):
             df= input_dfs[i].copy()
             df["Original Supplier order"]=df["Supplier order"].map(int)
-            df["Supplier order"]=df["Supplier order"]+sum([len(supplier) for supplier in suppliers[:i]])
+            df["Supplier order"]=df["Supplier order"] + sum(supplier_lengths[:i])
             concatenated_dfs=pd.concat([concatenated_dfs,df])
+
         new_supplier=[]
+
         for sup in suppliers:
             new_supplier+=list(sup)
         suppliers=[new_supplier]
@@ -305,6 +448,13 @@ def cluster_filter(input_dfs,suppliers,clustering_cutoff,clusters_to_save, group
     for supplier, score_df in zip(suppliers, input_dfs):
         c=Cluster(supplier, score_df)
         numbers, centroids=c.cluster(cutoff=clustering_cutoff)
+
+        # update log
+        n_clusters = len(set(numbers))
+        n_centroids = int(sum(centroids))
+        n_in = len(score_df)
+        log.add(f"  Input molecules: {n_in} | Clusters found: {n_clusters} | Centroids: {n_centroids}")
+
         numbers = numbers.astype(int)
         centroids = centroids.astype(int)
 
@@ -314,8 +464,12 @@ def cluster_filter(input_dfs,suppliers,clustering_cutoff,clusters_to_save, group
         score_df["Cluster centroid"] = centroids.astype(int)
 
         # Save centroids from 500 most populated cluster
-        score_df = score_df[(score_df["Cluster centroid"] == True)]
+        score_df = score_df[(score_df["Cluster centroid"] == 1)]
         score_df = score_df[(score_df["Cluster number"] < clusters_to_save)]
+
+        # update log
+        log.add(f"  Molecules saved (top {clusters_to_save} clusters): {len(score_df)}")
+
         if 'Original Supplier order' in score_df.columns:
             score_df['Concatenated Supplier order']=score_df['Supplier order']
             score_df['Supplier order']=score_df['Original Supplier order']
@@ -323,40 +477,80 @@ def cluster_filter(input_dfs,suppliers,clustering_cutoff,clusters_to_save, group
         new_score_dfs.append(score_df)
 
     print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
+    log.add(f"Completed in {int(time.time() - start_time)} seconds")
     return new_score_dfs
 
 
-def save(input_dfs,docked_scores, docked_molecules, suppliers,output_suffix, grouped):
+def _get_run_counter(output_suffix: str) -> str:
+    def any_exists(counter):
+        patterns = [
+            f"filterfiesta_{output_suffix}{counter}.log",
+            f"filterfiesta_grouped_{output_suffix}{counter}.csv",
+            f"filterfiesta_grouped_{output_suffix}{counter}.sdf",
+            f"*_{output_suffix}{counter}.csv",
+            f"*_{output_suffix}{counter}.sdf",
+        ]
+        return any(
+            f for pattern in patterns
+            for f in Path().glob(pattern)
+        )
+    if not any_exists(""):
+        return ""
+    counter = 1
+
+    while any_exists(f"_{counter}"):
+        counter += 1
+
+    return f"_{counter}"
+
+
+def _write_output(df, supplier, csv_path, sdf_path, log):
+    if 'Concatenated Supplier order' in df.columns:
+        selected_mols = [supplier[i] for i in df['Concatenated Supplier order'] if supplier[i] is not None]
+        df.drop('Concatenated Supplier order', axis=1, inplace=True)
+    else:
+        selected_mols = [supplier[i] for i in df['Supplier order'] if supplier[i] is not None]
+    df.drop('Supplier order', axis=1, inplace=True)
+
+    with Chem.SDWriter(sdf_path) as writer:
+        for mol in selected_mols:
+            mol = Chem.rdmolops.AddHs(mol, addCoords=True)
+            writer.write(mol)
+
+    df.to_csv(csv_path, index=False)
+
+    # update log
+    log.add(f"  CSV:  {csv_path} ({len(df)} molecules)")
+    log.add(f"  SDF:  {sdf_path} ({len(selected_mols)} molecules written)")
+
+
+def save(input_dfs, docked_scores, docked_molecules, suppliers, output_suffix, grouped, log, run_counter=""):
+    log._header("OUTPUT")
     start_time = time.time()
     print("Writing output files...")
+
     if grouped:
-        new_supplier=[]
+        new_supplier = []
         for sup in suppliers:
-            new_supplier+=list(sup)
-        suppliers=[new_supplier]
-
-    for (df, input_csv,input_sdf, supplier) in zip(input_dfs,docked_scores,docked_molecules,suppliers):
-        input_csv_path=Path(input_csv)
-        output_csv_path=f"{input_csv_path.stem}_{output_suffix}{input_csv_path.suffix}"
-        input_sdf_path=Path(input_sdf)
-        output_sdf_path=f"{input_sdf_path.stem}_{output_suffix}{input_sdf_path.suffix}"
-
-        if grouped:
-            output_csv_path=f"grouped_{output_suffix}{input_csv_path.suffix}"
-            output_sdf_path=f"grouped_{output_suffix}{input_sdf_path.suffix}"
-
-        if 'Concatenated Supplier order' in df.columns:
-            selected_mols = [supplier[i] for i in df['Concatenated Supplier order'] if supplier[i] is not None]
-            df.drop('Concatenated Supplier order',axis=1,inplace=True)
+            new_supplier += list(sup)
+        if len(suppliers) == 1:
+            csv_path = Path(f"filterfiesta_{output_suffix}{run_counter}.csv")
+            sdf_path = Path(f"filterfiesta_{output_suffix}{run_counter}.sdf")
         else:
-            selected_mols = [supplier[i] for i in df['Supplier order'] if supplier[i] is not None]
-        df.drop('Supplier order',axis=1,inplace=True)
-        with Chem.SDWriter(output_sdf_path) as writer:
-            for mol in selected_mols:
-                mol= Chem.rdmolops.AddHs(mol,addCoords=True)
-                writer.write(mol)
-        df.to_csv(output_csv_path,index=False)
+            csv_path = Path(f"filterfiesta_grouped_{output_suffix}{run_counter}.csv")
+            sdf_path = Path(f"filterfiesta_grouped_{output_suffix}{run_counter}.sdf")
+        _write_output(input_dfs[0], new_supplier, csv_path, sdf_path, log)
+
+    else:
+        for df, input_csv, input_sdf, supplier in zip(input_dfs, docked_scores, docked_molecules, suppliers):
+            input_csv_path = Path(input_csv)
+            input_sdf_path = Path(input_sdf)
+            csv_path = Path(f"filterfiesta_{input_csv_path.stem}_{output_suffix}{run_counter}{input_csv_path.suffix}")
+            sdf_path = Path(f"filterfiesta_{input_sdf_path.stem}_{output_suffix}{run_counter}{input_sdf_path.suffix}")
+            _write_output(df, supplier, csv_path, sdf_path, log)
+
     print("--- Done. %s seconds ---\n\n" % int(time.time() - start_time))
+    log.add(f"Completed in {int(time.time() - start_time)} seconds")
 
 
 def main():
@@ -369,71 +563,127 @@ def main():
 """)
     args=create_parser()
 
-    if not args.sdf_score_property:
-        args.sdf_score_property=args.score_column
+    run_counter = _get_run_counter(args.output_suffix)
+    log = RunLogger(args.output_suffix, run_counter=run_counter)
+
+    if run_counter:
+        print(f"Files will be saved with suffix '{args.output_suffix}{run_counter}'")
+        log.add(f"Files will be saved with suffix '{args.output_suffix}{run_counter}'")
 
 
-    suppliers=[Chem.rdmolfiles.SDMolSupplier(lig) for lig in args.docked_molecules]
-    dfs=[pd.read_csv(score,sep=args.separator) for score in args.docked_scores]
-    right_order_dfs=match_molecule_order(dfs,
-                                         docked_molecules=args.docked_molecules,
-                                         receptors=args.receptors,
-                                         title_column=args.title_column,
-                                         score_column=args.score_column,
-                                         sdf_molecule_name=args.sdf_title_property,
-                                         sdf_score_property=args.sdf_score_property,
-                                        )
+    log._header("RUN PARAMETERS")
+    log.add(f"Run started:         {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    log.add(f"Score files:         {args.docked_scores}")
+    log.add(f"Molecule files:      {args.docked_molecules}")
+    log.add(f"Receptor files:      {args.receptors}")
+    log.add(f"Title column:        {args.title_column}")
+    log.add(f"Score column:        {args.score_column}")
+    log.add(f"SDF title property:  {args.sdf_title_property}")
+    log.add(f"Name key: {args.name_key}")
+    if args.sdf_secondary_property:
+        log.add(f"SDF secondary property:  {args.sdf_secondary_property}")
+    log.add(f"SDF score property:  {args.sdf_score_property}")
+    log.add(f"Score cutoff:        {args.score_cutoff}")
+    log.add(f"RMSD cutoff:         {args.rmsd_cutoff}")
+    log.add(f"PLIF cutoff:         {args.plif_cutoff}")
+    log.add(f"Clustering cutoff:   {args.clustering_cutoff}")
+    log.add(f"Output size:         {args.output_size}")
+    log.add(f"Output suffix:       {args.output_suffix}")
+    log.add(f"Grouped mode:        {not args.split}")
+    log.add(f"Save all:            {args.save_all}")
+    log.add(f"Reference residues:  {args.residues_reference}")
 
-    rmsd_filtered_dfs=average_conformer_rmsd(right_order_dfs,
-                                             suppliers=suppliers,
-                                             docked_molecules=args.docked_molecules,
-                                             title_column=args.title_column,
-                                             score_column=args.score_column,
-                                             rmsd_cutoff=args.rmsd_cutoff,
-                                             filter=not args.save_all)
-
-    filtered_docking_dfs=docking_score_filter(rmsd_filtered_dfs,
-                                              suppliers=suppliers,
-                                              docked_molecules=args.docked_molecules,
-                                              score_column=args.score_column,
-                                              score_cutoff=args.score_cutoff,
-                                              filter=not args.save_all)
-
-    plif_filtered_dfs=plif_filter(filtered_docking_dfs,
-                                reference_file=args.residues_reference,
-                                plif_cutoff=args.plif_cutoff,
-                                receptors=args.receptors,
-                                suppliers=suppliers,
-                                docked_molecules=args.docked_molecules,
-                                filter=not args.save_all
-                                )
-
-    a=plif_filtered_dfs
-    print(a[0][:10])
-    titles = [mol.GetProp("_Name") if mol is not None and mol.HasProp("_Name") else "Untitled" for mol in suppliers[0]]
-    print([titles[x] for x in a[0]["Supplier order"][:10]])
+    try:
+        if not args.sdf_score_property:
+            args.sdf_score_property=args.score_column
 
 
-    if args.save_all:
-        save(input_dfs=plif_filtered_dfs,
-         docked_scores=args.docked_scores,
-         docked_molecules=args.docked_molecules,
-         suppliers=suppliers,
-         output_suffix=args.output_suffix,
-         grouped=True)
+        suppliers=[Chem.rdmolfiles.SDMolSupplier(lig) for lig in args.docked_molecules]
+        dfs=[pd.read_csv(score,sep=args.separator) for score in args.docked_scores]
 
-    else:
-        clusterd_dfs=cluster_filter(input_dfs=plif_filtered_dfs,
+        log._header("INPUT FILES")
+        for sdf, csv, rec in zip(args.docked_molecules, args.docked_scores, args.receptors):
+            mol_count = len(pd.read_csv(csv, sep=args.separator))
+            log.add(f"  {sdf}: {mol_count} molecules in score table | receptor: {rec}")
+
+        right_order_dfs, supplier_lengths=match_molecule_order(dfs,
+                                            docked_molecules=args.docked_molecules,
+                                            receptors=args.receptors,
+                                            title_column=args.title_column,
+                                            score_column=args.score_column,
+                                            sdf_molecule_name=args.sdf_title_property,
+                                            sdf_score_property=args.sdf_score_property,
+                                            log=log,
+                                            secondary_property=args.sdf_secondary_property,
+                                            name_key=args.name_key
+                                            )
+
+        rmsd_filtered_dfs=average_conformer_rmsd(right_order_dfs,
+                                                suppliers=suppliers,
+                                                docked_molecules=args.docked_molecules,
+                                                title_column=args.title_column,
+                                                score_column=args.score_column,
+                                                rmsd_cutoff=args.rmsd_cutoff,
+                                                filter=not args.save_all,
+                                                log=log,
+                                                secondary_property=args.sdf_secondary_property,
+                                                name_key=args.name_key
+                                                )
+
+        filtered_docking_dfs=docking_score_filter(rmsd_filtered_dfs,
+                                                suppliers=suppliers,
+                                                docked_molecules=args.docked_molecules,
+                                                score_column=args.score_column,
+                                                score_cutoff=args.score_cutoff,
+                                                filter=not args.save_all,
+                                                log=log
+                                                )
+
+        plif_filtered_dfs=plif_filter(filtered_docking_dfs,
+                                    reference_file=args.residues_reference,
+                                    plif_cutoff=args.plif_cutoff,
+                                    receptors=args.receptors,
                                     suppliers=suppliers,
-                                    clustering_cutoff=args.clustering_cutoff,
-                                    clusters_to_save=args.output_size,
-                                    grouped=not args.split)
+                                    docked_molecules=args.docked_molecules,
+                                    filter=not args.save_all,
+                                    log=log
+                                    )
 
-        save(input_dfs=clusterd_dfs,
+        if args.save_all:
+            save(input_dfs=plif_filtered_dfs,
             docked_scores=args.docked_scores,
             docked_molecules=args.docked_molecules,
             suppliers=suppliers,
             output_suffix=args.output_suffix,
-            grouped=not args.split)
+            grouped=True,
+            log=log,
+            run_counter=run_counter
+            )
+
+        else:
+            clusterd_dfs=cluster_filter(input_dfs=plif_filtered_dfs,
+                                        supplier_lengths=supplier_lengths,
+                                        suppliers=suppliers,
+                                        clustering_cutoff=args.clustering_cutoff,
+                                        clusters_to_save=args.output_size,
+                                        grouped=not args.split,
+                                        log=log
+                                        )
+
+            save(input_dfs=clusterd_dfs,
+                docked_scores=args.docked_scores,
+                docked_molecules=args.docked_molecules,
+                suppliers=suppliers,
+                output_suffix=args.output_suffix,
+                grouped=not args.split,
+                log=log,
+                run_counter=run_counter
+                )
+    except Exception as e:
+        log.add(f"\nERROR: {type(e).__name__}: {e}")
+        log.close()
+        raise
+
+
 if __name__ == "__main__":
     main()
