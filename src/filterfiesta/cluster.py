@@ -31,6 +31,253 @@ class Cluster:
         return self.clusters
     '''
 
+    def OriginalClusterData(data, nPts, distThresh, isDistData=False, distFunc=EuclideanDist, reordering=False):
+        """  clusters the data points passed in and returns the list of clusters
+
+        **Arguments**
+
+        - data: a list, tuple, or numpy array of items with the input data
+            (see discussion of _isDistData_ argument for the exception)
+
+        - nPts: the number of points to be used
+
+        - distThresh: elements within this range of each other are considered
+            to be neighbors
+
+        - isDistData: set this toggle when the data passed in is a
+            distance matrix.  The distance matrix should be stored
+            in one of two formats: as an nxn NumPy array, or as a
+            symmetrically stored list or 1D array generated using a
+            similar process to the example below:
+
+                dists = []
+                for i in range(nPts):
+                for j in range(i):
+                    dists.append( distfunc(i,j) )
+
+        - distFunc: a function to calculate distances between points.
+            Receives 2 points as arguments, should return a float
+
+        - reordering: if this toggle is set, the number of neighbors is updated
+            for the unassigned molecules after a new cluster is created such
+            that always the molecule with the largest number of unassigned
+            neighbors is selected as the next cluster center.
+
+        **Returns**
+
+        - a tuple of tuples containing information about the clusters:
+            ( (cluster1_elem1, cluster1_elem2, ...),
+            (cluster2_elem1, cluster2_elem2, ...),
+            ...
+            )
+            The first element for each cluster is its centroid.
+
+        """
+        if isDistData:
+            # Check if data is a supported type
+            if not isinstance(data, (list, tuple, np.ndarray)):
+                raise TypeError(f"Unsupported type for data, {type(data)}")
+
+            # Check if data is a 1D array or list
+            if isinstance(data, (list, tuple)) or (isinstance(data, np.ndarray) and data.ndim == 1):
+            # Check if data length matches the required number of points
+                if len(data) != (nPts * (nPts - 1)) // 2:
+                    raise ValueError("Mismatched input data dimension and nPts")
+
+                # Create a distance matrix from the 1D data
+                dist_matrix = np.zeros(nPts, nPts)
+                idx = np.tril_indices(nPts, -1)
+                dist_matrix[idx] = data
+                dist_matrix += dist_matrix.T
+            else:
+                # Check if data is a matrix of the correct shape and use it as distance matrix
+                if data.shape != (nPts, nPts):
+                    raise ValueError(f"Input data with shape {data.shape} is not a matrix of the required shape {(nPts, nPts)}")
+                dist_matrix = data
+        '''else:
+            # Compute distance matrix from the data points
+            dist_matrix = compute_distance_matrix(data, nPts, distFunc)'''
+
+        # Initialize neighbor lists
+        neighbor_lists = [np.where(dist_matrix[i] <= distThresh)[0].tolist() for i in range(nPts)]
+
+        # Sort points by the number of neighbors in descending order
+        sorted_indices = [(len(neighbors), idx) for idx, neighbors in enumerate(neighbor_lists)]
+        sorted_indices.sort(reverse=True)
+
+        # Initialize clusters and a seen array to keep track of processed points
+        clusters = []
+        seen = np.zeros(nPts, dtype=bool)
+
+        # Process all candidate clusters that have at least two members
+        while sorted_indices and sorted_indices[0][0] > 1:
+            _, idx = sorted_indices.pop(0)
+            if seen[idx]:
+                continue
+
+            # Create a new cluster and mark points as seen
+            cluster = [idx]
+            seen[idx] = True
+            for neighbor in neighbor_lists[idx]:
+                if not seen[neighbor]:
+                    cluster.append(neighbor)
+                    seen[neighbor] = True
+
+            clusters.append(tuple(cluster))
+
+            # Update the number of neighbors:
+            # remove all members of the new cluster from the list of
+            # neighbors and reorder the sorted_indices
+            if reordering:
+                # Get the set of unassigned and affected molecules, i.e. all unseen molecules
+                # which have at least one of the members of the new cluster
+                # as a neighbor
+                affected = set(neighbor for point in cluster for neighbor in neighbor_lists[point] if not seen[neighbor])
+
+                # Loop over all remaining molecules in sorted_indices but only
+                # consider unassigned and affected compounds
+                for ii, element in enumerate(sorted_indices):
+                    affected_point = element[1]
+                    if affected_point in affected:
+                        # Update the number of neighbors
+                        new_neighbors = [nbr for nbr in neighbor_lists[affected_point] if not seen[nbr]]
+                        neighbor_lists[affected_point] = new_neighbors
+                        sorted_indices[ii] = (len(new_neighbors), affected_point)
+                # Reorder the list
+                sorted_indices.sort(reverse=True)
+
+        # Process any remaining single-point clusters
+        while sorted_indices:
+            _, idx = sorted_indices.pop(0)
+            if seen[idx]:
+                continue
+            clusters.append(tuple([idx]))
+        return tuple(clusters)
+
+
+
+    def NewClusterData(data, nPts, distThresh, isDistData=False, distFunc=EuclideanDist, reordering=False):
+        """  clusters the data points passed in and returns the list of clusters
+
+        **Arguments**
+
+        - data: a list, tuple, or numpy array of items with the input data
+            (see discussion of _isDistData_ argument for the exception)
+
+        - nPts: the number of points to be used
+
+        - distThresh: elements within this range of each other are considered
+            to be neighbors
+
+        - isDistData: set this toggle when the data passed in is a
+            distance matrix.  The distance matrix should be stored
+            in one of two formats: as an nxn NumPy array, or as a
+            symmetrically stored list or 1D array generated using a
+            similar process to the example below:
+
+                dists = []
+                for i in range(nPts):
+                for j in range(i):
+                    dists.append( distfunc(i,j) )
+
+        - distFunc: a function to calculate distances between points.
+            Receives 2 points as arguments, should return a float
+
+        - reordering: if this toggle is set, the number of neighbors is updated
+            for the unassigned molecules after a new cluster is created such
+            that always the molecule with the largest number of unassigned
+            neighbors is selected as the next cluster center.
+
+        **Returns**
+
+        - a tuple of tuples containing information about the clusters:
+            ( (cluster1_elem1, cluster1_elem2, ...),
+            (cluster2_elem1, cluster2_elem2, ...),
+            ...
+            )
+            The first element for each cluster is its centroid.
+
+        """
+        if isDistData:
+            # Check if data is a supported type
+            if not isinstance(data, (list, tuple, np.ndarray)):
+                raise TypeError(f"Unsupported type for data, {type(data)}")
+
+            # Check if data is a 1D array or list
+            if isinstance(data, (list, tuple)) or (isinstance(data, np.ndarray) and data.ndim == 1):
+            # Check if data length matches the required number of points
+                if len(data) != (nPts * (nPts - 1)) // 2:
+                    raise ValueError("Mismatched input data dimension and nPts")
+
+                # Create a distance matrix from the 1D data
+                dist_matrix = np.zeros((nPts, nPts), dtype=bool)
+                idx = np.tril_indices(nPts, -1)
+                dist_matrix[idx] = data
+                dist_matrix += dist_matrix.T
+            else:
+                # Check if data is a matrix of the correct shape and use it as distance matrix
+                if data.shape != (nPts, nPts):
+                    raise ValueError(f"Input data with shape {data.shape} is not a matrix of the required shape {(nPts, nPts)}")
+                dist_matrix = data
+        '''else:
+            # Compute distance matrix from the data points
+            dist_matrix = compute_distance_matrix(data, nPts, distFunc)'''
+
+        # Initialize neighbor lists
+        neighbor_lists = [np.where(dist_matrix[i] == True)[0].tolist() for i in range(nPts)]
+
+        # Sort points by the number of neighbors in descending order
+        sorted_indices = [(len(neighbors), idx) for idx, neighbors in enumerate(neighbor_lists)]
+        sorted_indices.sort(reverse=True)
+
+        # Initialize clusters and a seen array to keep track of processed points
+        clusters = []
+        seen = np.zeros(nPts, dtype=bool)
+
+        # Process all candidate clusters that have at least two members
+        while sorted_indices and sorted_indices[0][0] > 1:
+            _, idx = sorted_indices.pop(0)
+            if seen[idx]:
+                continue
+
+            # Create a new cluster and mark points as seen
+            cluster = [idx]
+            seen[idx] = True
+            for neighbor in neighbor_lists[idx]:
+                if not seen[neighbor]:
+                    cluster.append(neighbor)
+                    seen[neighbor] = True
+
+            clusters.append(tuple(cluster))
+
+            # Update the number of neighbors:
+            # remove all members of the new cluster from the list of
+            # neighbors and reorder the sorted_indices
+            if reordering:
+                # Get the set of unassigned and affected molecules, i.e. all unseen molecules
+                # which have at least one of the members of the new cluster
+                # as a neighbor
+                affected = set(neighbor for point in cluster for neighbor in neighbor_lists[point] if not seen[neighbor])
+
+                # Loop over all remaining molecules in sorted_indices but only
+                # consider unassigned and affected compounds
+                for ii, element in enumerate(sorted_indices):
+                    affected_point = element[1]
+                    if affected_point in affected:
+                        # Update the number of neighbors
+                        new_neighbors = [nbr for nbr in neighbor_lists[affected_point] if not seen[nbr]]
+                        neighbor_lists[affected_point] = new_neighbors
+                        sorted_indices[ii] = (len(new_neighbors), affected_point)
+                # Reorder the list
+                sorted_indices.sort(reverse=True)
+
+        # Process any remaining single-point clusters
+        while sorted_indices:
+            _, idx = sorted_indices.pop(0)
+            if seen[idx]:
+                continue
+            clusters.append(tuple([idx]))
+        return tuple(clusters)
 
     def cluster(self,cutoff=0.2):
         distance_matrix = []
@@ -54,5 +301,42 @@ class Cluster:
             for molecule in cluster:
                 cluster_number[molecule]=i
             cluster_centroid[cluster[0]]=1
+
+        return (cluster_number,cluster_centroid)
+
+    def NewClusterDajeDarko(self,cutoff=0.2):
+        '''New plan: be more like Darko.
+        - Fingerprints are calculated and stored in memory
+        - BulkTanimotoSimilarity is used to create a list/array of tuples: (molecule, number_of_neighbours)
+        - List is sorted based on neighbours
+        - First element: BulkTanimoto on every other element of the list --> if match, remove from list
+        - Save first element as cluster centroid of cluster #1
+        - Take the next available element and repeat BulkTanimoto --> gets faster each time
+        - Profit
+        '''
+        number_of_fps = len(self.morgan_fingerprints)
+        distance_matrix = np.empty(number_of_fps * (number_of_fps - 1) // 2, dtype=bool)
+
+        for i in tqdm(range(1,number_of_fps)): # from 1 and not 0 to avoid calculating similarity of a molecule with itself
+
+            # calculate tanimoto similarity values
+            similarities = np.asarray(DataStructs.BulkTanimotoSimilarity(self.morgan_fingerprints[i],
+                                                              self.morgan_fingerprints[:i])) # [:i] is to avoid calculating two times the same distances
+            # from similarities calculate tanimoto distances: distance = (1 - similarity)
+            start = i * (i - 1) // 2
+            distance_matrix[start:start + i] = (1 - similarities) <= cutoff # avoids having a list of lists of progressively longer length, Butina.ClusterData accepts only a monodimensional list
+            del similarities
+        clusters = self.NewClusterData(distance_matrix,number_of_fps,cutoff,isDistData=True)
+
+        # create arrays filled with 0s, to be later filled with cluster numbers and bools for cluster centroids
+        cluster_number=np.zeros((number_of_fps))
+        cluster_centroid=np.zeros((number_of_fps), dtype=bool)
+
+
+        for i,cluster in enumerate(clusters):
+            for molecule in cluster:
+                cluster_number[molecule]=i
+            cluster_centroid[cluster[0]]=1
+            del cluster
 
         return (cluster_number,cluster_centroid)
