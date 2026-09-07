@@ -2,6 +2,7 @@ from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
 from rdkit import DataStructs
 from tqdm import tqdm
+from array import array
 import numpy as np
 from rdkit import DataStructs
 from rdkit.ML.Cluster import Butina # type: ignore
@@ -10,8 +11,8 @@ class Cluster:
     def __init__(self,ligands,scores):
         morgan_gen = rdFingerprintGenerator.GetMorganGenerator(radius=4, fpSize=1024) # !!! to separate into its own method
         print("Generating Morgan fingerprints...")
-        self.morgan_fingerprints = [morgan_gen.GetFingerprint(ligands[i]) for i in tqdm(scores["Supplier order"]) if ligands[i] is not None]
-
+        #self.morgan_fingerprints = [morgan_gen.GetFingerprint(ligands[i]) for i in tqdm(scores["Supplier order"]) if ligands[i] is not None]
+        self.from_idx_to_fp = {i:fp for i,fp in enumerate([morgan_gen.GetFingerprint(ligands[i]) for i in tqdm(scores["Supplier order"]) if ligands[i] is not None])}
 
     '''
     def calculate_cluster(self,cutoff=0.2):
@@ -304,16 +305,7 @@ class Cluster:
 
         return (cluster_number,cluster_centroid)
 
-    def NewClusterDajeDarko(self,cutoff=0.2):
-        '''New plan: be more like Darko.
-        - Fingerprints are calculated and stored in memory
-        - BulkTanimotoSimilarity is used to create a list/array of tuples: (molecule, number_of_neighbours)
-        - List is sorted based on neighbours
-        - First element: BulkTanimoto on every other element of the list --> if match, remove from list
-        - Save first element as cluster centroid of cluster #1
-        - Take the next available element and repeat BulkTanimoto --> gets faster each time
-        - Profit
-        '''
+    def NewCluster(self,cutoff=0.2):
         number_of_fps = len(self.morgan_fingerprints)
         distance_matrix = np.empty(number_of_fps * (number_of_fps - 1) // 2, dtype=bool)
 
@@ -340,3 +332,144 @@ class Cluster:
             del cluster
 
         return (cluster_number,cluster_centroid)
+
+    def _neighbor_lists_from_fingerprints(self, cutoff, ):
+        n = len(self.morgan_fingerprints)
+        neighbor_lists = ([array('i') for _ in range(n)], [])
+
+        for i in tqdm(range(n)):
+            if i > 0:
+                similarities = np.asarray(
+                    DataStructs.BulkTanimotoSimilarity(self.morgan_fingerprints[i], self.morgan_fingerprints[:i])
+                )
+                distances = 1 - similarities  # identical arithmetic to the original code
+                matched = np.nonzero(distances <= cutoff)[0]
+                for j in matched:
+                    j = int(j)
+                    neighbor_lists[0][j].append(i)
+                    neighbor_lists[0][i].append(j)
+
+        lengths = [len(neighbor_lists[i]) for i in range(len(neighbor_lists))]
+
+        neighbor_lists[1].extend(lengths)
+
+        return neighbor_lists
+
+    def _Darko_neighbor_lists_from_fingerprints(self, cutoff):
+        n = len(self.morgan_fingerprints)
+        neighbor_lists = [(i,0) for i in self.morgan_fingerprints]
+
+
+        for i in tqdm(range(n)):
+            if i > 0:
+                similarities = np.asarray(
+                    DataStructs.BulkTanimotoSimilarity(neighbor_lists[i][0], neighbor_lists[:i][0])
+                )
+                distances = 1 - similarities  # identical arithmetic to the original code
+                matched = np.nonzero(distances <= cutoff)[0]
+                for j in matched:
+                    j = int(j)
+                    neighbor_lists[j][1] += 1
+                    neighbor_lists[i][1] += 1
+        return neighbor_lists
+
+    def NewClusterDajeDarko(self,cutoff=0.2):
+        '''New plan: be more like Darko.
+        - Fingerprints are calculated and stored in memory
+        - BulkTanimotoSimilarity is used to create a list/array of tuples: (molecule, number_of_neighbours)
+        - List is sorted based on neighbours
+        - First element: BulkTanimoto on every other element of the list --> if match, remove from list
+        - Save first element as cluster centroid of cluster #1
+        - Take the next available element and repeat BulkTanimoto --> gets faster each time
+        - Profit
+        '''
+        n = len(self.from_idx_to_fp)
+        # from_idx_to_fp = {i:fp for i,fp in enumerate(self.morgan_fingerprints)}
+        cluster_counter = 0
+        # create arrays filled with 0s, to be later filled with cluster numbers and bools for cluster centroids
+        cluster_number=np.zeros((n))
+        cluster_centroid=np.zeros((n))
+
+        # calculate number of neighbors for all molecules (only once as per Butina original implementation)
+        from_idx_to_neighbors = {i:0 for i in self.from_idx_to_fp.keys()}
+
+        for i in list(from_idx_to_neighbors.keys())[1:]:
+            similarities = np.asarray(DataStructs.BulkTanimotoSimilarity(self.from_idx_to_fp[i], list(self.from_idx_to_fp.values())[:i]))
+            distances = 1 - similarities  # identical arithmetic to the original code
+            matched = np.nonzero(distances <= cutoff)[0]
+            for j in matched:
+                j = int(j)
+                from_idx_to_neighbors[j] += 1
+                from_idx_to_neighbors[i] += 1
+
+        # main loop: iteratively finds cluster centroids, assigns as cluster members all molecules within cutoff, then removes them from the dicts
+        while len(self.from_idx_to_fp) > 0:
+
+            # find centroid, i.e. molecule with the highest number of neighbours
+            centroid_idx = list(from_idx_to_neighbors)[np.argmax(list(from_idx_to_neighbors.values()))]
+            centroid_fp = self.from_idx_to_fp[centroid_idx]
+
+            # remove centroid from dicts
+            self.from_idx_to_fp.pop(centroid_idx)
+            from_idx_to_neighbors.pop(centroid_idx)
+
+            # find cluster members
+            similarities = np.asarray(DataStructs.BulkTanimotoSimilarity(centroid_fp, list(self.from_idx_to_fp.values())))
+            distances = 1 - similarities
+            mask = distances <= cutoff
+
+            # retrieve cluster member array using numpy fancy indexing
+            cluster_members = np.asarray(list(self.from_idx_to_fp.keys()))[mask]
+
+            # remove cluster members from dictionaries
+            self.from_idx_to_fp = {key:self.from_idx_to_fp[key] for key in self.from_idx_to_fp.keys() if key not in set(cluster_members)}
+            from_idx_to_neighbors = {key:from_idx_to_neighbors[key] for key in self.from_idx_to_fp.keys()}
+
+            # update arrays with cluster members and cluster centroid
+            cluster_number[cluster_members] = cluster_counter
+            cluster_centroid[centroid_idx] = 1
+
+            # increase cluster counter
+            cluster_counter += 1
+
+        return cluster_number, cluster_centroid
+
+
+
+        '''neighbor_lists = self._neighbor_lists_from_fingerprints(cutoff)
+
+        cluster_number=np.zeros((number_of_fps))
+        cluster_centroid=np.zeros((number_of_fps), dtype=bool)
+
+        cluster_counter = 1
+
+        while len(neighbor_lists) > 1:
+            centroid = max(neighbor_lists[1])
+
+            for i in neighbor_lists[0][centroid]:
+                cluster_number[i] = cluster_counter
+                neighbor_lists[0].pop(i)
+                neighbor_lists[1].pop(i)
+
+            cluster_centroid[centroid] = 1
+            neighbor_lists[0].pop(centroid)
+            neighbor_lists[0].pop(centroid)
+
+            cluster_counter += 1
+
+
+
+
+        clusters = self.NewClusterData(distance_matrix,number_of_fps,cutoff,isDistData=True)
+
+        # create arrays filled with 0s, to be later filled with cluster numbers and bools for cluster centroids
+
+
+
+        for i,cluster in enumerate(clusters):
+            for molecule in cluster:
+                cluster_number[molecule]=i
+            cluster_centroid[cluster[0]]=1
+            del cluster
+
+        return (cluster_number,cluster_centroid)'''
