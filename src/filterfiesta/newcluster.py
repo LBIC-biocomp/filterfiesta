@@ -11,7 +11,7 @@ from functools import partial
 from multiprocessing import Pool
 import time
 
-class Cluster:
+class NewCluster:
     def __init__(self,ligands,scores=None, issimple=False):
         morgan_gen = rdFingerprintGenerator.GetMorganGenerator(radius=4, fpSize=1024) # !!! to separate into its own method
         print("Generating Morgan fingerprints...")
@@ -64,15 +64,16 @@ class Cluster:
 
         if n_workers is None:
             n_workers = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
+            n_workers = min(8, n_workers)
 
-        order = Cluster.zigzag_order(number_of_fingerprints)
+        order = NewCluster.zigzag_order(number_of_fingerprints)
 
         if chunksize is None:
             # aim for ~20 chunks per worker, so the pool has room to balance
             # load even with the zig-zag ordering already smoothing things out
             chunksize = max(1, len(order) // (n_workers * 20))
 
-        worker = partial(Cluster._compute_row, fingerprints=fingerprints, cutoff=cutoff)
+        worker = partial(NewCluster._compute_row, fingerprints=fingerprints, cutoff=cutoff)
 
         with Pool(processes=n_workers) as pool:
             for i, matched_positions in tqdm(pool.imap_unordered(worker, order, chunksize=chunksize), total=len(order)):
@@ -110,7 +111,8 @@ class Cluster:
             print(f"Finding members for cluster {cluster_counter}...")
 
             # find centroid, i.e. molecule with the highest number of neighbours
-            centroid_idx = list(from_idx_to_neighbors)[np.argmax(list(from_idx_to_neighbors.values()))]
+            max_pos = len(from_idx_to_neighbors) -1 - np.argmax(list(from_idx_to_neighbors.values())[::-1])
+            centroid_idx = list(from_idx_to_neighbors)[max_pos]
             centroid_fp = self.from_idx_to_fp[centroid_idx]
 
             # remove centroid from dicts
@@ -126,11 +128,12 @@ class Cluster:
             cluster_members = np.asarray(list(self.from_idx_to_fp.keys()), dtype=int)[mask]
 
             # remove cluster members from dictionaries
-            from_idx_to_fp = {key:self.from_idx_to_fp[key] for key in self.from_idx_to_fp.keys() if key not in set(cluster_members)}
-            from_idx_to_neighbors = {key:from_idx_to_neighbors[key] for key in from_idx_to_fp.keys()}
+            self.from_idx_to_fp = {key:self.from_idx_to_fp[key] for key in self.from_idx_to_fp.keys() if key not in set(cluster_members)}
+            from_idx_to_neighbors = {key:from_idx_to_neighbors[key] for key in self.from_idx_to_fp.keys()}
 
             # update arrays with cluster members and cluster centroid
             cluster_number[cluster_members] = cluster_counter
+            cluster_number[centroid_idx] = cluster_counter
             cluster_centroid[centroid_idx] = 1
 
             # increase cluster counter
@@ -140,19 +143,34 @@ class Cluster:
 
         end = time.time()
 
+        duration = end - start
+
         print("Cluster_number:\n", cluster_number)
 
-        print("Time:",end - start)
+        print("Time:", duration)
+
+        return (cluster_number, cluster_centroid, duration)
 
 if __name__ == '__main__':
     import pandas as pd
+    from cluster import Cluster
 
     ligands_df = pd.read_csv("/home/luca/projects/2026_filterfiesta_debugging/filterfiesta/notebooks/cluster_test.smi", sep=" ")
     ligands_smi = ligands_df[ligands_df.columns[0]]
 
     print("Uploading ligands...")
-    ligands = [Chem.MolFromSmiles(smi) for smi in ligands_smi]
+    ligands = [Chem.MolFromSmiles(smi) for smi in tqdm(ligands_smi)]
 
+    nc = NewCluster(ligands, scores=None, issimple=True)
     c = Cluster(ligands, scores=None, issimple=True)
 
-    c.NewClusterDajeDarko(cutoff=0.6)
+    new_cluster_number, new_cluster_centroid, new_time = nc.NewClusterDajeDarko(cutoff=0.7)
+    del nc
+
+    cluster_number, cluster_centroid, c_time = c.cluster(cutoff=0.7)
+    del c
+
+    print("Old time:", c_time)
+    print("New time:", new_time)
+    print("Difference in cluster numbers:", len(np.nonzero(new_cluster_number - cluster_number)[0]))
+    print("Difference in cluster Centroids:", len(np.nonzero(new_cluster_centroid - cluster_centroid)[0]))
