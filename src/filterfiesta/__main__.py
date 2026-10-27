@@ -9,7 +9,7 @@ from itertools import chain
 from pathlib import Path
 
 from filterfiesta.fingerprints import Fingerprint
-from filterfiesta.cluster import Cluster
+from filterfiesta.newcluster import NewCluster
 from filterfiesta.pose_similarity import Similarity
 
 
@@ -130,6 +130,12 @@ def create_parser():
         type=int,
         default=500,
         help="Number of molecules to save after filtering. Defaults to 500."
+    )
+    parser.add_argument(
+        "-cn", "--cluster_n_processes",
+        type=int,
+        default=4,
+        help="Number of parallel processes for clustering. Defaults to 1."
     )
     parser.add_argument(
         "--output_suffix",
@@ -421,7 +427,7 @@ def plif_filter(input_dfs,reference_file, plif_cutoff,receptors, suppliers, dock
     return new_score_dfs
 
 
-def cluster_filter(input_dfs, supplier_lengths, suppliers, clustering_cutoff, clusters_to_save, grouped, log):
+def cluster_filter(input_dfs, supplier_lengths, suppliers, clustering_cutoff, clusters_to_save, cluster_n_workers, grouped, log):
     log._header("STEP 5 — CLUSTERING")
     log.add(f"Clustering cutoff: {clustering_cutoff} | Grouped: {grouped} | Max clusters to save: {clusters_to_save}")
     start_time = time.time()
@@ -446,8 +452,8 @@ def cluster_filter(input_dfs, supplier_lengths, suppliers, clustering_cutoff, cl
         input_dfs=[concatenated_dfs]
 
     for supplier, score_df in zip(suppliers, input_dfs):
-        c=Cluster(supplier, score_df)
-        numbers, centroids=c.cluster(cutoff=clustering_cutoff)
+        c=NewCluster(supplier, score_df)
+        numbers, centroids=c.NewClusterDajeDarko(n_workers=cluster_n_workers, cutoff=clustering_cutoff)
 
         # update log
         n_clusters = len(set(numbers))
@@ -662,13 +668,14 @@ def main():
 
         else:
             clusterd_dfs=cluster_filter(input_dfs=plif_filtered_dfs,
-                                        supplier_lengths=supplier_lengths,
-                                        suppliers=suppliers,
-                                        clustering_cutoff=args.clustering_cutoff,
-                                        clusters_to_save=args.output_size,
-                                        grouped=not args.split,
-                                        log=log
-                                        )
+                                    supplier_lengths=supplier_lengths,
+                                    suppliers=suppliers,
+                                    clustering_cutoff=args.clustering_cutoff,
+                                    clusters_to_save=args.output_size,
+                                    cluster_n_workers=args.cluster_n_workers,
+                                    grouped=not args.split,
+                                    log=log
+                                    )
 
             save(input_dfs=clusterd_dfs,
                 docked_scores=args.docked_scores,
