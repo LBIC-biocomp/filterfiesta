@@ -10,6 +10,7 @@ from pathlib import Path
 
 from filterfiesta.fingerprints import Fingerprint
 from filterfiesta.newcluster import NewCluster
+from filterfiesta.test_cluster import NewClusterTest
 from filterfiesta.pose_similarity import Similarity
 
 
@@ -132,10 +133,10 @@ def create_parser():
         help="Number of molecules to save after filtering. Defaults to 500."
     )
     parser.add_argument(
-        "-cn", "--cluster_n_processes",
+        "-cn", "--cluster_n_workers",
         type=int,
         default=4,
-        help="Number of parallel processes for clustering. Defaults to 1."
+        help="Number of parallel processes for clustering. Defaults to 4."
     )
     parser.add_argument(
         "--output_suffix",
@@ -452,7 +453,7 @@ def cluster_filter(input_dfs, supplier_lengths, suppliers, clustering_cutoff, cl
         input_dfs=[concatenated_dfs]
 
     for supplier, score_df in zip(suppliers, input_dfs):
-        c=NewCluster(supplier, score_df)
+        c=NewClusterTest(supplier, score_df)
         numbers, centroids=c.NewClusterDajeDarko(n_workers=cluster_n_workers, cutoff=clustering_cutoff)
 
         # update log
@@ -594,6 +595,7 @@ def main():
     log.add(f"PLIF cutoff:         {args.plif_cutoff}")
     log.add(f"Clustering cutoff:   {args.clustering_cutoff}")
     log.add(f"Output size:         {args.output_size}")
+    log.add(f"Cluster n workers:   {args.cluster_n_workers}")
     log.add(f"Output suffix:       {args.output_suffix}")
     log.add(f"Grouped mode:        {not args.split}")
     log.add(f"Save all:            {args.save_all}")
